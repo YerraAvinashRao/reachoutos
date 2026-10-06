@@ -1,0 +1,230 @@
+import React, { useState } from 'react';
+import { 
+  ShieldAlert, 
+  ShieldCheck, 
+  Database, 
+  Server, 
+  Lock, 
+  Download, 
+  Users, 
+  Radio, 
+  Key,
+  HardDrive
+} from 'lucide-react';
+import { Tenant, Role } from '../types';
+
+interface SettingsViewProps {
+  tenant: Tenant | null;
+  onToggleKillSwitch: (reason: string) => void;
+  onExportContacts: () => void;
+  userRole: Role;
+}
+
+export const SettingsView: React.FC<SettingsViewProps> = ({
+  tenant,
+  onToggleKillSwitch,
+  onExportContacts,
+  userRole
+}) => {
+  const [killReason, setKillReason] = useState('Safety check initiated by administrator');
+
+  return (
+    <div className="max-w-4xl mx-auto space-y-6 text-xs">
+      <div>
+        <h1 className="text-base font-bold text-neutral-900 dark:text-neutral-100">
+          Workspace Settings & Security Governance
+        </h1>
+        <p className="text-neutral-500 dark:text-neutral-400 mt-0.5">
+          Emergency kill switches, RBAC access gates, infrastructure portability adapters, and data retention policies
+        </p>
+      </div>
+
+      {/* 1. Emergency Kill Switch */}
+      <div className="p-5 rounded-xl border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 shadow-sm space-y-4">
+        <div className="flex items-start justify-between">
+          <div className="space-y-1">
+            <div className="flex items-center gap-2 font-bold text-neutral-900 dark:text-neutral-100 text-sm">
+              <ShieldAlert className="w-4 h-4 text-rose-500" />
+              <span>Workspace Outreach Emergency Kill Switch</span>
+            </div>
+            <p className="text-[11px] text-neutral-500 leading-relaxed max-w-xl">
+              Halts all manual and queued outreach across every campaign and channel instantaneously. When active, no operator can prepare, open, or transmit messages.
+            </p>
+          </div>
+
+          <span className={`px-2 py-0.5 rounded font-mono font-bold text-[10px] ${
+            tenant?.isKillSwitchActive
+              ? 'bg-rose-100 text-rose-700 dark:bg-rose-950 dark:text-rose-400 animate-pulse'
+              : 'bg-emerald-100 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-400'
+          }`}>
+            {tenant?.isKillSwitchActive ? 'PAUSED (ACTIVE)' : 'ARMED & READY'}
+          </span>
+        </div>
+
+        {tenant?.isKillSwitchActive ? (
+          <div className="p-3.5 rounded-lg bg-rose-50 dark:bg-rose-950/30 border border-rose-200 dark:border-rose-900 text-rose-900 dark:text-rose-300 space-y-2">
+            <div>
+              <strong>Kill Switch Activated:</strong> {tenant.killSwitchReason || 'No reason provided'}
+            </div>
+            <div className="text-[11px] text-rose-700 dark:text-rose-400">
+              Triggered by: {tenant.killSwitchTriggeredBy || 'Administrator'} at {tenant.killSwitchTriggeredAt}
+            </div>
+            {userRole !== 'VIEWER' && userRole !== 'OPERATOR' && (
+              <button
+                onClick={() => onToggleKillSwitch('Resumed by administrator')}
+                className="px-3 py-1.5 rounded bg-emerald-600 hover:bg-emerald-700 text-white font-semibold text-xs transition"
+              >
+                Resume All Workspace Outreach
+              </button>
+            )}
+          </div>
+        ) : (
+          <div className="flex flex-col sm:flex-row items-center gap-3 pt-1">
+            <input
+              type="text"
+              placeholder="Reason for triggering kill switch (e.g. Catalog pricing error)..."
+              value={killReason}
+              onChange={(e) => setKillReason(e.target.value)}
+              className="flex-1 px-3 py-1.5 rounded-md border border-neutral-200 dark:border-neutral-700 bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 focus:outline-none"
+            />
+            {userRole !== 'VIEWER' && userRole !== 'OPERATOR' && (
+              <button
+                onClick={() => onToggleKillSwitch(killReason)}
+                className="px-4 py-1.5 rounded-md bg-rose-600 hover:bg-rose-700 text-white font-semibold text-xs shadow-sm transition"
+              >
+                Trigger Kill Switch (Pause All)
+              </button>
+            )}
+          </div>
+        )}
+      </div>
+
+      {/* 2. Infrastructure & Database Portability Matrix */}
+      <div className="p-5 rounded-xl border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 shadow-sm space-y-3">
+        <div className="flex items-center gap-2 font-bold text-neutral-900 dark:text-neutral-100 text-sm">
+          <Database className="w-4 h-4 text-blue-500" />
+          <span>Infrastructure & Provider Abstraction Matrix</span>
+        </div>
+        <p className="text-[11px] text-neutral-500">
+          The domain core is decoupled from all vendor SDKs via repository ports (<code className="font-mono">ContactRepository</code>, <code className="font-mono">CampaignRepository</code>).
+        </p>
+
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-3 pt-1">
+          <div className="p-3 rounded-lg border border-emerald-200 dark:border-emerald-800 bg-emerald-50/40 dark:bg-emerald-950/20 space-y-1">
+            <div className="font-bold text-neutral-900 dark:text-neutral-100 flex items-center justify-between">
+              <span>Database Adapter</span>
+              <span className="text-[10px] text-emerald-600 font-mono font-bold">ONLINE</span>
+            </div>
+            <div className="text-[11px] text-neutral-500 font-mono">SupabaseDatabaseAdapter (PostgreSQL + RLS)</div>
+            <div className="text-[10px] text-emerald-700 dark:text-emerald-400">PostgreSQL Schema & RLS Authoritative</div>
+          </div>
+
+          <div className="p-3 rounded-lg border border-neutral-200 dark:border-neutral-800 bg-neutral-50/50 dark:bg-neutral-800/40 space-y-1">
+            <div className="font-bold text-neutral-900 dark:text-neutral-100 flex items-center justify-between">
+              <span>Object Storage Adapter</span>
+              <span className="text-[10px] text-blue-600 font-mono font-bold">ACTIVE</span>
+            </div>
+            <div className="text-[11px] text-neutral-500 font-mono">InMemoryStorageProvider</div>
+            <div className="text-[10px] text-neutral-400">S3 / Supabase Storage Compatible</div>
+          </div>
+
+          <div className="p-3 rounded-lg border border-neutral-200 dark:border-neutral-800 bg-neutral-50/50 dark:bg-neutral-800/40 space-y-1">
+            <div className="font-bold text-neutral-900 dark:text-neutral-100 flex items-center justify-between">
+              <span>AI Provider Adapter</span>
+              <span className="text-[10px] text-purple-600 font-mono font-bold">CONNECTED</span>
+            </div>
+            <div className="text-[11px] text-neutral-500 font-mono">@google/genai (3.8 Flash)</div>
+            <div className="text-[10px] text-neutral-400">Deterministic Policy Guardrails</div>
+          </div>
+        </div>
+      </div>
+
+      {/* 3. Role-Based Access Control (RBAC) Matrix */}
+      <div className="p-5 rounded-xl border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 shadow-sm space-y-3">
+        <div className="flex items-center gap-2 font-bold text-neutral-900 dark:text-neutral-100 text-sm">
+          <Lock className="w-4 h-4 text-neutral-600" />
+          <span>Role-Based Access Control (RBAC) Permissions</span>
+        </div>
+
+        <div className="overflow-x-auto">
+          <table className="w-full text-left text-neutral-700 dark:text-neutral-300">
+            <thead className="border-b border-neutral-200 dark:border-neutral-800 text-[11px] text-neutral-500 font-medium">
+              <tr>
+                <th className="py-2">Capability</th>
+                <th className="py-2 text-center">OWNER</th>
+                <th className="py-2 text-center">ADMIN</th>
+                <th className="py-2 text-center">MANAGER</th>
+                <th className="py-2 text-center">OPERATOR</th>
+                <th className="py-2 text-center">VIEWER</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-neutral-100 dark:divide-neutral-800 text-[11px]">
+              <tr>
+                <td className="py-2 font-medium">View Contacts & Timeline</td>
+                <td className="py-2 text-center text-emerald-600">✓</td>
+                <td className="py-2 text-center text-emerald-600">✓</td>
+                <td className="py-2 text-center text-emerald-600">✓</td>
+                <td className="py-2 text-center text-emerald-600">✓</td>
+                <td className="py-2 text-center text-emerald-600">✓</td>
+              </tr>
+              <tr>
+                <td className="py-2 font-medium">Import & Edit Contacts</td>
+                <td className="py-2 text-center text-emerald-600">✓</td>
+                <td className="py-2 text-center text-emerald-600">✓</td>
+                <td className="py-2 text-center text-emerald-600">✓</td>
+                <td className="py-2 text-center text-emerald-600">✓</td>
+                <td className="py-2 text-center text-rose-500">✕</td>
+              </tr>
+              <tr>
+                <td className="py-2 font-medium">Execute Manual Outreach (W, E, S)</td>
+                <td className="py-2 text-center text-emerald-600">✓</td>
+                <td className="py-2 text-center text-emerald-600">✓</td>
+                <td className="py-2 text-center text-emerald-600">✓</td>
+                <td className="py-2 text-center text-emerald-600">✓</td>
+                <td className="py-2 text-center text-rose-500">✕</td>
+              </tr>
+              <tr>
+                <td className="py-2 font-medium">Approve Outreach Campaigns</td>
+                <td className="py-2 text-center text-emerald-600">✓</td>
+                <td className="py-2 text-center text-emerald-600">✓</td>
+                <td className="py-2 text-center text-emerald-600">✓</td>
+                <td className="py-2 text-center text-rose-500">✕</td>
+                <td className="py-2 text-center text-rose-500">✕</td>
+              </tr>
+              <tr>
+                <td className="py-2 font-medium">Trigger Emergency Kill Switch</td>
+                <td className="py-2 text-center text-emerald-600">✓</td>
+                <td className="py-2 text-center text-emerald-600">✓</td>
+                <td className="py-2 text-center text-emerald-600">✓</td>
+                <td className="py-2 text-center text-rose-500">✕</td>
+                <td className="py-2 text-center text-rose-500">✕</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      {/* 4. Data Lifecycle & Export */}
+      <div className="p-5 rounded-xl border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 shadow-sm space-y-3">
+        <div className="flex items-center justify-between">
+          <div>
+            <h3 className="font-bold text-neutral-900 dark:text-neutral-100 text-sm">
+              Data Lifecycle Management & Export
+            </h3>
+            <p className="text-[11px] text-neutral-500">
+              Export tenant contacts or audit trails in CSV format for local backup.
+            </p>
+          </div>
+
+          <button
+            onClick={onExportContacts}
+            className="px-3 py-1.5 rounded-md border border-neutral-300 dark:border-neutral-700 bg-neutral-50 dark:bg-neutral-800 hover:bg-neutral-100 dark:hover:bg-neutral-700 text-neutral-700 dark:text-neutral-300 font-medium flex items-center gap-1.5 shadow-sm transition"
+          >
+            <Download className="w-3.5 h-3.5" />
+            <span>Export Verified Contacts CSV</span>
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+};

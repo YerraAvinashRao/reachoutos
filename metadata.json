@@ -1,0 +1,6 @@
+{
+  "name": "ReachOut OS — Secure Multi-Channel Outreach & Contact Intelligence",
+  "description": "AI-assisted, human-in-the-loop multi-channel communication platform with contact intelligence, data quality engine, suppression rules, campaign snapshots, and manual WhatsApp/Email dispatch.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

@@ -1,0 +1,491 @@
+import React, { useState, useEffect, useCallback } from 'react';
+import { 
+  ArrowLeft, 
+  Send, 
+  CheckCircle2, 
+  SkipForward, 
+  ShieldAlert, 
+  Copy, 
+  ExternalLink, 
+  Paperclip, 
+  Keyboard, 
+  Pause, 
+  Check, 
+  HelpCircle,
+  Building,
+  MapPin,
+  Phone,
+  Mail,
+  AlertCircle,
+  RefreshCw,
+  Clock
+} from 'lucide-react';
+import { Campaign, CampaignRecipient, Contact, Role } from '../types';
+
+interface ManualSendingWorkspaceProps {
+  campaign: Campaign;
+  recipients: CampaignRecipient[];
+  contacts: Contact[];
+  onBack: () => void;
+  onPrepare: (recipientId: string) => Promise<any>;
+  onMarkSent: (recipientId: string) => Promise<any>;
+  onSkip: (recipientId: string, reason?: string) => Promise<any>;
+  onToggleBlock: (contactId: string, reason?: string) => Promise<any>;
+  onPauseCampaign: () => void;
+  userRole: Role;
+}
+
+export const ManualSendingWorkspace: React.FC<ManualSendingWorkspaceProps> = ({
+  campaign,
+  recipients,
+  contacts,
+  onBack,
+  onPrepare,
+  onMarkSent,
+  onSkip,
+  onToggleBlock,
+  onPauseCampaign,
+  userRole
+}) => {
+  // Find first unsent or active index
+  const initialIndex = Math.max(0, recipients.findIndex(r => r.status === 'READY' || r.status === 'OPENED'));
+  const [currentIndex, setCurrentIndex] = useState(initialIndex !== -1 ? initialIndex : 0);
+  const [copied, setCopied] = useState(false);
+  const [policyModalOpen, setPolicyModalOpen] = useState(false);
+  const [policyReasons, setPolicyReasons] = useState<any[]>([]);
+  const [loadingAction, setLoadingAction] = useState(false);
+  const [lastOpenedAt, setLastOpenedAt] = useState<string | null>(null);
+
+  const currentRecipient = recipients[currentIndex];
+  const currentContact = contacts.find(c => c.id === currentRecipient?.contactId);
+
+  // Completed metrics
+  const total = recipients.length;
+  const sentCount = recipients.filter(r => r.status === 'USER_SENT').length;
+  const skippedCount = recipients.filter(r => r.status === 'SKIPPED').length;
+  const progressPct = Math.round((sentCount / (total || 1)) * 100);
+
+  // Trigger Open Composer
+  const handleOpenChannel = useCallback(async () => {
+    if (!currentRecipient || userRole === 'VIEWER') return;
+    setLoadingAction(true);
+    try {
+      const res = await onPrepare(currentRecipient.id);
+      if (res?.data?.prepared?.deepLinkUrl) {
+        // Legitimate browser navigation to official composer
+        window.open(res.data.prepared.deepLinkUrl, '_blank');
+        setLastOpenedAt(new Date().toLocaleTimeString());
+      } else if (res?.error?.policyResult) {
+        setPolicyReasons(res.error.policyResult.reasons || []);
+        setPolicyModalOpen(true);
+      }
+    } catch (err: any) {
+      console.error(err);
+    } finally {
+      setLoadingAction(false);
+    }
+  }, [currentRecipient, userRole, onPrepare]);
+
+  // Mark Sent and auto-advance
+  const handleMarkSent = useCallback(async () => {
+    if (!currentRecipient || userRole === 'VIEWER') return;
+    setLoadingAction(true);
+    try {
+      await onMarkSent(currentRecipient.id);
+      if (currentIndex < recipients.length - 1) {
+        setCurrentIndex(prev => prev + 1);
+      }
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setLoadingAction(false);
+    }
+  }, [currentRecipient, userRole, onMarkSent, currentIndex, recipients.length]);
+
+  // Skip and advance
+  const handleSkip = useCallback(async () => {
+    if (!currentRecipient || userRole === 'VIEWER') return;
+    setLoadingAction(true);
+    try {
+      await onSkip(currentRecipient.id, 'Manually skipped in focus workspace');
+      if (currentIndex < recipients.length - 1) {
+        setCurrentIndex(prev => prev + 1);
+      }
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setLoadingAction(false);
+    }
+  }, [currentRecipient, userRole, onSkip, currentIndex, recipients.length]);
+
+  // Block contact
+  const handleBlock = useCallback(async () => {
+    if (!currentContact || userRole === 'VIEWER') return;
+    if (window.confirm(`Globally block and suppress ${currentContact.displayName}? This stops all future outreach across all channels.`)) {
+      setLoadingAction(true);
+      try {
+        await onToggleBlock(currentContact.id, 'Suppressed during campaign review');
+        await onSkip(currentRecipient.id, 'Contact globally suppressed');
+        if (currentIndex < recipients.length - 1) {
+          setCurrentIndex(prev => prev + 1);
+        }
+      } catch (err) {
+        console.error(err);
+      } finally {
+        setLoadingAction(false);
+      }
+    }
+  }, [currentContact, currentRecipient, userRole, onToggleBlock, onSkip, currentIndex, recipients.length]);
+
+  // Copy message
+  const handleCopyMessage = () => {
+    if (!currentRecipient) return;
+    navigator.clipboard.writeText(currentRecipient.resolvedMessage);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
+
+  // Keyboard navigation listener (W, E, S, K, B, N, P, C)
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      // Ignore if user is inside an input or textarea
+      if (['INPUT', 'TEXTAREA', 'SELECT'].includes((e.target as HTMLElement).tagName)) {
+        return;
+      }
+
+      const key = e.key.toUpperCase();
+      if (key === 'W' || key === 'E') {
+        e.preventDefault();
+        handleOpenChannel();
+      } else if (key === 'S') {
+        e.preventDefault();
+        handleMarkSent();
+      } else if (key === 'K') {
+        e.preventDefault();
+        handleSkip();
+      } else if (key === 'B') {
+        e.preventDefault();
+        handleBlock();
+      } else if (key === 'C') {
+        e.preventDefault();
+        handleCopyMessage();
+      } else if (key === 'N') {
+        e.preventDefault();
+        if (currentIndex < recipients.length - 1) setCurrentIndex(prev => prev + 1);
+      } else if (key === 'P') {
+        e.preventDefault();
+        if (currentIndex > 0) setCurrentIndex(prev => prev - 1);
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [handleOpenChannel, handleMarkSent, handleSkip, handleBlock, currentIndex, recipients.length]);
+
+  if (!currentRecipient) {
+    return (
+      <div className="p-8 text-center space-y-4 rounded-xl border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900">
+        <CheckCircle2 className="w-12 h-12 text-emerald-500 mx-auto" />
+        <h2 className="text-base font-bold text-neutral-900 dark:text-neutral-100">
+          Campaign Queue Complete!
+        </h2>
+        <p className="text-xs text-neutral-500">
+          All recipients have been reviewed and processed.
+        </p>
+        <button
+          onClick={onBack}
+          className="px-4 py-2 rounded-lg bg-neutral-900 dark:bg-white text-white dark:text-neutral-900 text-xs font-semibold"
+        >
+          Return to Campaign Overview
+        </button>
+      </div>
+    );
+  }
+
+  const isSent = currentRecipient.status === 'USER_SENT';
+  const isOpened = currentRecipient.status === 'OPENED';
+  const isSuppressed = currentRecipient.status === 'BLOCKED' || currentRecipient.status === 'OPTED_OUT' || currentContact?.isGloballyBlocked;
+
+  return (
+    <div className="max-w-4xl mx-auto space-y-4">
+      {/* Top Bar: Progress & Emergency Pause */}
+      <div className="flex items-center justify-between border-b border-neutral-200 dark:border-neutral-800 pb-3">
+        <button
+          onClick={onBack}
+          className="flex items-center gap-1.5 text-xs text-neutral-500 hover:text-neutral-900 dark:hover:text-neutral-100 transition font-medium"
+        >
+          <ArrowLeft className="w-3.5 h-3.5" />
+          <span>Exit Workspace</span>
+        </button>
+
+        {/* Campaign Name & Counter */}
+        <div className="text-center">
+          <div className="text-xs font-bold text-neutral-900 dark:text-neutral-100">
+            {campaign.name}
+          </div>
+          <div className="text-[11px] font-mono text-neutral-500">
+            Recipient {currentIndex + 1} of {total} ({progressPct}% Dispatched)
+          </div>
+        </div>
+
+        {/* Emergency Pause Button */}
+        <button
+          onClick={onPauseCampaign}
+          className="px-2.5 py-1.5 rounded-md border border-amber-300 dark:border-amber-800 bg-amber-50 dark:bg-amber-950/30 text-amber-700 dark:text-amber-400 text-xs font-semibold hover:bg-amber-100 transition flex items-center gap-1.5"
+          title="Pause Campaign - Stops queue progression immediately"
+        >
+          <Pause className="w-3 h-3" />
+          <span>Pause Campaign</span>
+        </button>
+      </div>
+
+      {/* Progress Line */}
+      <div className="w-full bg-neutral-200 dark:bg-neutral-800 h-1 rounded-full overflow-hidden">
+        <div
+          className="bg-emerald-600 h-1 transition-all duration-300"
+          style={{ width: `${progressPct}%` }}
+        />
+      </div>
+
+      {/* MAIN DISPATCH CARD */}
+      <div className="p-6 rounded-2xl border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 shadow-xl space-y-5">
+        {/* Contact Info Header */}
+        <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-3 border-b border-neutral-100 dark:border-neutral-800 pb-4">
+          <div className="space-y-1">
+            <div className="flex items-center gap-2">
+              <h2 className="text-lg font-bold text-neutral-900 dark:text-neutral-100">
+                {currentRecipient.contactName}
+              </h2>
+              <span className={`px-2 py-0.5 rounded text-[10px] font-mono font-medium ${
+                isSent
+                  ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-400'
+                  : isOpened
+                  ? 'bg-blue-100 text-blue-800 dark:bg-blue-950 dark:text-blue-400'
+                  : isSuppressed
+                  ? 'bg-rose-100 text-rose-800 dark:bg-rose-950 dark:text-rose-400'
+                  : 'bg-neutral-100 text-neutral-700 dark:bg-neutral-800 dark:text-neutral-300'
+              }`}>
+                {currentRecipient.status}
+              </span>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-3 text-xs text-neutral-500">
+              <span className="flex items-center gap-1">
+                <Building className="w-3.5 h-3.5 text-neutral-400" />
+                <strong className="text-neutral-700 dark:text-neutral-300">{currentRecipient.companyName || '—'}</strong>
+              </span>
+              <span>•</span>
+              <span className="flex items-center gap-1">
+                <MapPin className="w-3.5 h-3.5 text-neutral-400" />
+                <span>{currentContact?.city || '—'}, {currentContact?.state || ''}</span>
+              </span>
+              <span>•</span>
+              <span className="flex items-center gap-1 font-mono text-neutral-700 dark:text-neutral-300">
+                <Phone className="w-3.5 h-3.5 text-emerald-600" />
+                <span>{currentRecipient.channelAddress}</span>
+              </span>
+            </div>
+          </div>
+
+          {/* Quick Tag Pills */}
+          <div className="flex flex-wrap gap-1">
+            {currentContact?.tags.map(t => (
+              <span key={t} className="px-2 py-0.5 rounded bg-neutral-100 dark:bg-neutral-800 text-[10px] font-mono text-neutral-600 dark:text-neutral-400 font-medium">
+                {t}
+              </span>
+            ))}
+          </div>
+        </div>
+
+        {/* Attachment Alert Banner (Strict Human-in-the-Loop requirement) */}
+        {currentRecipient.attachmentName && (
+          <div className="p-3.5 rounded-xl border border-blue-200 dark:border-blue-900 bg-blue-50/40 dark:bg-blue-950/20 text-xs text-blue-900 dark:text-blue-300 space-y-1">
+            <div className="flex items-center gap-2 font-semibold">
+              <Paperclip className="w-4 h-4 text-blue-600" />
+              <span>Attachment Required: {currentRecipient.attachmentName}</span>
+            </div>
+            <p className="text-[11px] text-blue-700 dark:text-blue-400 leading-relaxed">
+              Official WhatsApp & Email deep links do not allow silent arbitrary file payloads. 
+              When composer opens, please manually attach this document using the paperclip icon before pressing Send.
+            </p>
+          </div>
+        )}
+
+        {/* Message Preview Box */}
+        <div className="space-y-1.5">
+          <div className="flex items-center justify-between text-xs">
+            <span className="font-semibold text-neutral-500 uppercase tracking-wider text-[11px]">
+              Personalized Message Preview
+            </span>
+            <button
+              onClick={handleCopyMessage}
+              className="flex items-center gap-1 text-[11px] text-neutral-500 hover:text-neutral-900 dark:hover:text-neutral-100 font-medium transition"
+            >
+              {copied ? <Check className="w-3 h-3 text-emerald-600" /> : <Copy className="w-3 h-3" />}
+              <span>{copied ? 'Copied to clipboard' : 'Copy text (C)'}</span>
+            </button>
+          </div>
+
+          <div className="p-4 rounded-xl border border-neutral-200 dark:border-neutral-800 bg-neutral-50/80 dark:bg-neutral-800/40 text-neutral-900 dark:text-neutral-100 whitespace-pre-line text-sm font-sans leading-relaxed select-text shadow-inner">
+            {currentRecipient.resolvedMessage}
+          </div>
+        </div>
+
+        {/* Human-in-the-Loop Status & Timestamp Indicator */}
+        <div className="flex items-center justify-between text-[11px] text-neutral-400 pt-1">
+          <div className="flex items-center gap-1.5">
+            <Clock className="w-3.5 h-3.5" />
+            <span>
+              {lastOpenedAt ? `Composer opened at ${lastOpenedAt}` : 'Composer not yet loaded for this recipient'}
+            </span>
+          </div>
+
+          {isSuppressed && (
+            <button
+              onClick={() => setPolicyModalOpen(true)}
+              className="text-rose-600 dark:text-rose-400 font-semibold underline flex items-center gap-1"
+            >
+              <AlertCircle className="w-3 h-3" />
+              <span>Why can't I send?</span>
+            </button>
+          )}
+        </div>
+
+        {/* Primary Action Buttons */}
+        <div className="pt-3 border-t border-neutral-100 dark:border-neutral-800 flex flex-wrap items-center justify-between gap-3">
+          {/* Navigation (Prev / Next) */}
+          <div className="flex items-center gap-1.5">
+            <button
+              onClick={() => currentIndex > 0 && setCurrentIndex(prev => prev - 1)}
+              disabled={currentIndex === 0}
+              className="px-2.5 py-1.5 rounded-md border border-neutral-200 dark:border-neutral-700 text-xs font-medium text-neutral-600 dark:text-neutral-300 disabled:opacity-40 hover:bg-neutral-50 dark:hover:bg-neutral-800 transition"
+              title="Previous (P)"
+            >
+              ← Prev
+            </button>
+            <button
+              onClick={() => currentIndex < recipients.length - 1 && setCurrentIndex(prev => prev + 1)}
+              disabled={currentIndex === recipients.length - 1}
+              className="px-2.5 py-1.5 rounded-md border border-neutral-200 dark:border-neutral-700 text-xs font-medium text-neutral-600 dark:text-neutral-300 disabled:opacity-40 hover:bg-neutral-50 dark:hover:bg-neutral-800 transition"
+              title="Next (N)"
+            >
+              Next →
+            </button>
+          </div>
+
+          {/* Action Trio */}
+          <div className="flex items-center gap-2">
+            {/* Skip */}
+            <button
+              onClick={handleSkip}
+              disabled={loadingAction || userRole === 'VIEWER'}
+              className="px-3 py-2 rounded-lg border border-neutral-200 dark:border-neutral-700 text-neutral-600 dark:text-neutral-300 text-xs font-medium hover:bg-neutral-100 dark:hover:bg-neutral-800 transition"
+              title="Skip (K)"
+            >
+              Skip (K)
+            </button>
+
+            {/* Block / Do Not Contact */}
+            <button
+              onClick={handleBlock}
+              disabled={loadingAction || userRole === 'VIEWER'}
+              className="px-3 py-2 rounded-lg border border-rose-200 dark:border-rose-900/60 text-rose-600 dark:text-rose-400 text-xs font-medium hover:bg-rose-50 dark:hover:bg-rose-950/30 transition"
+              title="Block / Do Not Contact (B)"
+            >
+              Block (B)
+            </button>
+
+            {/* 1. Open WhatsApp / Email */}
+            <button
+              onClick={handleOpenChannel}
+              disabled={loadingAction || isSuppressed || userRole === 'VIEWER'}
+              className="px-4 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-semibold text-xs flex items-center gap-1.5 shadow-sm transition disabled:opacity-50"
+              title="Open Official Composer (W)"
+            >
+              <ExternalLink className="w-3.5 h-3.5" />
+              <span>Open {campaign.channel} (W)</span>
+            </button>
+
+            {/* 2. Mark Sent */}
+            <button
+              onClick={handleMarkSent}
+              disabled={loadingAction || userRole === 'VIEWER'}
+              className="px-4 py-2 rounded-lg bg-neutral-900 dark:bg-white text-white dark:text-neutral-900 font-bold text-xs flex items-center gap-1.5 shadow-sm hover:bg-neutral-800 dark:hover:bg-neutral-100 transition disabled:opacity-50"
+              title="Confirm user transmitted message (S)"
+            >
+              <CheckCircle2 className="w-3.5 h-3.5" />
+              <span>Mark Sent (S)</span>
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {/* Keyboard Shortcut Ribbon */}
+      <div className="flex flex-wrap items-center justify-between gap-2 p-2.5 rounded-lg border border-neutral-100 dark:border-neutral-800 bg-neutral-50/60 dark:bg-neutral-900/40 text-[11px] text-neutral-500 font-mono">
+        <div className="flex items-center gap-3">
+          <span><kbd className="px-1 py-0.5 rounded bg-white dark:bg-neutral-800 border border-neutral-200 dark:border-neutral-700 text-neutral-800 dark:text-neutral-200 font-bold">W</kbd> Open WhatsApp</span>
+          <span><kbd className="px-1 py-0.5 rounded bg-white dark:bg-neutral-800 border border-neutral-200 dark:border-neutral-700 text-neutral-800 dark:text-neutral-200 font-bold">S</kbd> Mark Sent</span>
+          <span><kbd className="px-1 py-0.5 rounded bg-white dark:bg-neutral-800 border border-neutral-200 dark:border-neutral-700 text-neutral-800 dark:text-neutral-200 font-bold">K</kbd> Skip</span>
+          <span><kbd className="px-1 py-0.5 rounded bg-white dark:bg-neutral-800 border border-neutral-200 dark:border-neutral-700 text-neutral-800 dark:text-neutral-200 font-bold">B</kbd> Block</span>
+          <span><kbd className="px-1 py-0.5 rounded bg-white dark:bg-neutral-800 border border-neutral-200 dark:border-neutral-700 text-neutral-800 dark:text-neutral-200 font-bold">C</kbd> Copy Text</span>
+        </div>
+        <div className="text-[10px] text-neutral-400">
+          Strict Human Verification • No simulated browser clicks
+        </div>
+      </div>
+
+      {/* "Why can't I send?" Policy Diagnostic Modal */}
+      {policyModalOpen && (
+        <div className="fixed inset-0 bg-neutral-950/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="w-full max-w-md bg-white dark:bg-neutral-900 rounded-xl border border-neutral-200 dark:border-neutral-800 shadow-2xl p-5 space-y-4">
+            <div className="flex items-center justify-between border-b border-neutral-200 dark:border-neutral-800 pb-3">
+              <h3 className="text-sm font-bold text-neutral-900 dark:text-neutral-100 flex items-center gap-1.5">
+                <ShieldAlert className="w-4 h-4 text-rose-500" />
+                <span>Why can't I send? — Policy Diagnostic</span>
+              </h3>
+              <button onClick={() => setPolicyModalOpen(false)} className="text-neutral-400">✕</button>
+            </div>
+
+            <p className="text-xs text-neutral-500">
+              The deterministic Communication Policy Engine evaluated this recipient against all consent, suppression, and data quality gates:
+            </p>
+
+            <div className="space-y-2 text-xs">
+              {policyReasons.length === 0 ? (
+                <div className="p-2.5 rounded bg-rose-50 dark:bg-rose-950/40 text-rose-700 dark:text-rose-400">
+                  {currentRecipient.policyNotes || 'This contact is suppressed or opted out from marketing.'}
+                </div>
+              ) : (
+                policyReasons.map((r, i) => (
+                  <div
+                    key={i}
+                    className={`p-2.5 rounded flex items-start gap-2 ${
+                      r.passed
+                        ? 'bg-emerald-50 dark:bg-emerald-950/30 text-emerald-800 dark:text-emerald-300'
+                        : 'bg-rose-50 dark:bg-rose-950/30 text-rose-800 dark:text-rose-300'
+                    }`}
+                  >
+                    <span className="font-bold text-xs mt-0.5">{r.passed ? '✓' : '✕'}</span>
+                    <div>
+                      <div className="font-semibold text-[11px] font-mono">{r.code}</div>
+                      <div className="text-[11px]">{r.message}</div>
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+
+            <div className="flex justify-end pt-2 border-t border-neutral-200 dark:border-neutral-800">
+              <button
+                onClick={() => setPolicyModalOpen(false)}
+                className="px-4 py-1.5 rounded bg-neutral-900 dark:bg-white text-white dark:text-neutral-900 font-semibold text-xs"
+              >
+                Understood
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
