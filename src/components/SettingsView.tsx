@@ -9,24 +9,57 @@ import {
   Users, 
   Radio, 
   Key,
-  HardDrive
+  HardDrive,
+  User as UserIcon,
+  CheckCircle2,
+  AlertCircle,
+  Loader2
 } from 'lucide-react';
-import { Tenant, Role } from '../types';
+import { Tenant, Role, User } from '../types';
+import { supabase } from '../services/supabaseClient';
 
 interface SettingsViewProps {
   tenant: Tenant | null;
   onToggleKillSwitch: (reason: string) => void;
   onExportContacts: () => void;
   userRole: Role;
+  user?: User | null;
 }
 
 export const SettingsView: React.FC<SettingsViewProps> = ({
   tenant,
   onToggleKillSwitch,
   onExportContacts,
-  userRole
+  userRole,
+  user
 }) => {
   const [killReason, setKillReason] = useState('Safety check initiated by administrator');
+  const [newPassword, setNewPassword] = useState('');
+  const [passwordLoading, setPasswordLoading] = useState(false);
+  const [passwordMsg, setPasswordMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+
+  const handleUpdatePassword = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (newPassword.length < 6) {
+      setPasswordMsg({ type: 'error', text: 'Password must be at least 6 characters.' });
+      return;
+    }
+    setPasswordLoading(true);
+    setPasswordMsg(null);
+    try {
+      const { error } = await supabase.auth.updateUser({
+        password: newPassword,
+        data: { has_password_set: true }
+      });
+      if (error) throw error;
+      setPasswordMsg({ type: 'success', text: 'Password updated successfully! You can now sign in with this password.' });
+      setNewPassword('');
+    } catch (err: any) {
+      setPasswordMsg({ type: 'error', text: err?.message || 'Failed to update password.' });
+    } finally {
+      setPasswordLoading(false);
+    }
+  };
 
   return (
     <div className="max-w-4xl mx-auto space-y-6 text-xs">
@@ -38,6 +71,79 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
           Emergency kill switches, RBAC access gates, infrastructure portability adapters, and data retention policies
         </p>
       </div>
+
+      {/* 0. User Account Profile & Dual-Auth Security */}
+      {user && (
+        <div className="p-5 rounded-xl border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 shadow-sm space-y-4">
+          <div className="flex items-start justify-between">
+            <div className="space-y-1">
+              <div className="flex items-center gap-2 font-bold text-neutral-900 dark:text-neutral-100 text-sm">
+                <UserIcon className="w-4 h-4 text-emerald-600" />
+                <span>Account Profile & Authentication</span>
+              </div>
+              <p className="text-[11px] text-neutral-500 leading-relaxed">
+                Your linked identity details used across campaign operations and audit trails.
+              </p>
+            </div>
+            <span className="px-2 py-0.5 rounded font-mono font-bold text-[10px] bg-emerald-100 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-400">
+              ROLE: {user.role}
+            </span>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2">
+            <div className="p-3 rounded-lg border border-neutral-200 dark:border-neutral-800 bg-neutral-50/50 dark:bg-neutral-800/30">
+              <div className="text-[11px] text-neutral-500">Full Name (Authoritative)</div>
+              <div className="text-sm font-semibold text-neutral-900 dark:text-neutral-100 mt-0.5">
+                {user.name || 'Unnamed Operator'}
+              </div>
+            </div>
+            <div className="p-3 rounded-lg border border-neutral-200 dark:border-neutral-800 bg-neutral-50/50 dark:bg-neutral-800/30">
+              <div className="text-[11px] text-neutral-500">Email Address</div>
+              <div className="text-sm font-semibold text-neutral-900 dark:text-neutral-100 mt-0.5 font-mono">
+                {user.email}
+              </div>
+            </div>
+          </div>
+
+          {/* Quick password change */}
+          <form onSubmit={handleUpdatePassword} className="pt-2 border-t border-neutral-100 dark:border-neutral-800 space-y-3">
+            <div className="font-semibold text-neutral-800 dark:text-neutral-200 flex items-center gap-1.5 text-xs">
+              <Lock className="w-3.5 h-3.5 text-neutral-500" />
+              <span>Update / Reset Account Password</span>
+            </div>
+            <p className="text-[11px] text-neutral-500">
+              Setting a password allows direct login using your email & password without needing Google OAuth.
+            </p>
+            {passwordMsg && (
+              <div className={`p-2.5 rounded-lg text-xs flex items-center gap-2 ${
+                passwordMsg.type === 'success'
+                  ? 'bg-emerald-950/40 border border-emerald-900/60 text-emerald-300'
+                  : 'bg-rose-950/40 border border-rose-900/60 text-rose-300'
+              }`}>
+                {passwordMsg.type === 'success' ? <CheckCircle2 className="w-3.5 h-3.5 shrink-0" /> : <AlertCircle className="w-3.5 h-3.5 shrink-0" />}
+                <span>{passwordMsg.text}</span>
+              </div>
+            )}
+            <div className="flex gap-2 max-w-md">
+              <input
+                type="password"
+                minLength={6}
+                value={newPassword}
+                onChange={(e) => setNewPassword(e.target.value)}
+                placeholder="New password (min 6 chars)"
+                className="flex-1 px-3 py-1.5 text-xs rounded-lg border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-800 text-neutral-900 dark:text-white placeholder-neutral-400 focus:outline-none focus:ring-1 focus:ring-neutral-900 dark:focus:ring-white"
+              />
+              <button
+                type="submit"
+                disabled={passwordLoading || !newPassword}
+                className="px-3 py-1.5 bg-neutral-900 dark:bg-white text-white dark:text-neutral-900 font-semibold rounded-lg hover:opacity-90 transition disabled:opacity-50 text-xs shrink-0 cursor-pointer"
+              >
+                {passwordLoading ? 'Saving...' : 'Update Password'}
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
 
       {/* 1. Emergency Kill Switch */}
       <div className="p-5 rounded-xl border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 shadow-sm space-y-4">

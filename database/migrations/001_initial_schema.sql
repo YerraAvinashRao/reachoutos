@@ -110,7 +110,7 @@ CREATE TABLE IF NOT EXISTS public.contacts (
     country VARCHAR(100) NOT NULL DEFAULT 'India',
     status VARCHAR(50) NOT NULL DEFAULT 'ACTIVE' CHECK (status IN ('ACTIVE', 'BLOCKED', 'OPTED_OUT', 'ARCHIVED', 'INVALID')),
     source VARCHAR(100) NOT NULL DEFAULT 'manual',
-    lead_status VARCHAR(50) NOT NULL DEFAULT 'LEAD' CHECK (lead_status IN ('LEAD', 'PROSPECT', 'RETAILER', 'DISTRIBUTOR', 'WHOLESALE', 'VIP')),
+    lead_status VARCHAR(50) NOT NULL DEFAULT 'LEAD' CHECK (LENGTH(TRIM(lead_status)) > 0),
     notes TEXT NOT NULL DEFAULT '',
     tags TEXT[] NOT NULL DEFAULT '{}',
     custom_fields JSONB NOT NULL DEFAULT '{}'::jsonb,

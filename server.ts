@@ -1,5 +1,5 @@
+import 'dotenv/config';
 import express, { Request, Response, NextFunction } from 'express';
-import dotenv from 'dotenv';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { db, DatabaseUnconfiguredError } from './src/infrastructure/database/SupabaseDatabaseAdapter';
@@ -15,8 +15,6 @@ import {
 } from './src/middleware/authMiddleware';
 import { Contact, ChannelType, CampaignRecipient, Role } from './src/types';
 
-dotenv.config();
-
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
@@ -24,6 +22,7 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 
 app.use(express.json({ limit: '25mb' }));
+app.get('/favicon.ico', (_req, res) => res.status(204).end());
 
 const whatsAppChannel = new WhatsAppManualChannel();
 const emailChannel = new EmailManualChannel();
@@ -339,14 +338,88 @@ api.put(
   }
 );
 
+api.post(
+  '/contacts/bulk-update',
+  requireRole(['OWNER', 'ADMIN', 'MANAGER', 'OPERATOR']),
+  async (req: AuthenticatedRequest, res: Response) => {
+    try {
+      const { contactIds, updates } = req.body;
+      if (!Array.isArray(contactIds) || contactIds.length === 0) {
+        return res.status(400).json({ error: { message: 'No contact IDs provided' } });
+      }
+      const tenantId = req.auth!.tenant.id;
+      const client = (db as any).getClient();
+
+      const dbUpdates: Record<string, any> = {
+        updated_at: new Date().toISOString()
+      };
+      if (updates.leadStatus) dbUpdates.lead_status = updates.leadStatus;
+      if (updates.city) dbUpdates.city = updates.city;
+      if (updates.tags) dbUpdates.tags = updates.tags;
+
+      // Update in chunks of 200
+      const CHUNK = 200;
+      for (let i = 0; i < contactIds.length; i += CHUNK) {
+        const chunk = contactIds.slice(i, i + CHUNK);
+        const { error } = await client
+          .from('contacts')
+          .update(dbUpdates)
+          .eq('tenant_id', tenantId)
+          .in('id', chunk);
+        if (error) throw error;
+      }
+
+      await logAudit('CONTACTS_BULK_UPDATED', 'CONTACT', `bulk-${Date.now()}`, { count: contactIds.length, updates }, req);
+      res.json({ success: true, count: contactIds.length });
+    } catch (err) {
+      handleDatabaseError(err, res);
+    }
+  }
+);
+
 api.delete(
   '/contacts/:id',
-  requireRole(['OWNER', 'ADMIN', 'MANAGER']),
+  requireRole(['OWNER', 'ADMIN', 'MANAGER', 'OPERATOR']),
   async (req: AuthenticatedRequest, res: Response) => {
     try {
       await db.contactsRepo.delete(req.params.id, req.auth!.tenant.id);
       await logAudit('CONTACT_DELETED', 'CONTACT', req.params.id, {}, req);
       res.json({ success: true });
+    } catch (err) {
+      handleDatabaseError(err, res);
+    }
+  }
+);
+
+api.post(
+  '/contacts/bulk-delete',
+  requireRole(['OWNER', 'ADMIN', 'MANAGER', 'OPERATOR']),
+  async (req: AuthenticatedRequest, res: Response) => {
+    try {
+      const { contactIds } = req.body;
+      if (!Array.isArray(contactIds) || contactIds.length === 0) {
+        return res.status(400).json({ error: { message: 'No contact IDs provided to delete' } });
+      }
+
+      const client = (db as any).getClient();
+      const tenantId = req.auth!.tenant.id;
+
+      // Delete in chunks of 200 to prevent payload limits
+      const CHUNK = 200;
+      for (let i = 0; i < contactIds.length; i += CHUNK) {
+        const chunk = contactIds.slice(i, i + CHUNK);
+        // Clean up contact_list_members junction
+        await client.from('contact_list_members').delete().eq('tenant_id', tenantId).in('contact_id', chunk);
+        // Clean up contact_timeline
+        await client.from('contact_timeline').delete().eq('tenant_id', tenantId).in('contact_id', chunk);
+        // Clean up campaign_recipients
+        await client.from('campaign_recipients').delete().eq('tenant_id', tenantId).in('contact_id', chunk);
+        // Delete contacts
+        await client.from('contacts').delete().eq('tenant_id', tenantId).in('id', chunk);
+      }
+
+      await logAudit('CONTACTS_BULK_DELETED', 'CONTACT', `bulk-${Date.now()}`, { count: contactIds.length }, req);
+      res.json({ success: true, count: contactIds.length });
     } catch (err) {
       handleDatabaseError(err, res);
     }
@@ -376,8 +449,11 @@ api.post(
 
       await db.contactsRepo.addTimelineEvent({
         contactId: contact.id,
+        tenantId: req.auth!.tenant.id,
         eventType: isBlocked ? 'BLOCKED' : 'CONTACT_UPDATED',
         actor: req.auth!.user.name,
+        actorId: req.auth!.user.id,
+        actorName: req.auth!.user.name,
         description: isBlocked ? `Globally blocked: ${reason}` : 'Global block removed'
       });
 
@@ -408,8 +484,11 @@ api.post(
 
       await db.contactsRepo.addTimelineEvent({
         contactId: contact.id,
+        tenantId: req.auth!.tenant.id,
         eventType: 'NOTE_ADDED',
         actor: req.auth!.user.name,
+        actorId: req.auth!.user.id,
+        actorName: req.auth!.user.name,
         description: `Added note: "${note.substring(0, 80)}${note.length > 80 ? '...' : ''}"`
       });
 
@@ -516,7 +595,8 @@ api.post('/imports/preview', async (req: AuthenticatedRequest, res: Response) =>
           warningRows,
           issues: issues.slice(0, 100)
         },
-        sampleProcessed: processedRows.slice(0, 20)
+        sampleProcessed: processedRows.slice(0, 50),
+        processedRows: processedRows
       }
     });
   } catch (err) {
@@ -529,40 +609,98 @@ api.post(
   requireRole(['OWNER', 'ADMIN', 'MANAGER', 'OPERATOR']),
   async (req: AuthenticatedRequest, res: Response) => {
     try {
-      const { rows, duplicatePolicy = 'UPDATE_EXISTING', sourceFileName = 'imported_contacts.csv' } = req.body;
+      const { 
+        rows, 
+        duplicatePolicy = 'UPDATE_EXISTING', 
+        sourceFileName = 'imported_contacts.csv',
+        leadStatus = 'LEAD',
+        targetListId
+      } = req.body;
+      if (!Array.isArray(rows) || rows.length === 0) {
+        return res.status(400).json({ error: { message: 'No contact rows provided to import' } });
+      }
 
-      const contactsToInsert: Array<Omit<Contact, 'id' | 'createdAt' | 'updatedAt'>> = rows.map((r: any) => ({
-        tenantId: req.auth!.tenant.id,
-        firstName: sanitizeSpreadsheetCell(r.name ? r.name.split(' ')[0] : 'Unknown'),
-        lastName: sanitizeSpreadsheetCell(r.name ? r.name.split(' ').slice(1).join(' ') : ''),
-        displayName: sanitizeSpreadsheetCell(r.name || 'Unknown'),
-        companyName: sanitizeSpreadsheetCell(r.company || ''),
-        jobTitle: sanitizeSpreadsheetCell(r.jobTitle || 'Buyer'),
-        phone: r.phone,
-        email: r.email || '',
-        city: sanitizeSpreadsheetCell(r.city || ''),
-        state: r.state || 'Telangana',
-        country: r.country || 'India',
-        status: 'ACTIVE',
-        source: sourceFileName,
-        leadStatus: 'LEAD',
-        notes: `Imported via ${sourceFileName} with duplicate policy ${duplicatePolicy}`,
-        tags: ['IMPORTED', ...(r.city ? [r.city.toUpperCase()] : [])],
-        customFields: r.customFields || {},
-        channelAddresses: [
-          { id: `addr-${Date.now()}-1`, channelType: 'WHATSAPP', address: r.phone, isPrimary: true, isVerified: true },
-          { id: `addr-${Date.now()}-2`, channelType: 'EMAIL', address: r.email, isPrimary: true, isVerified: !!r.email }
-        ],
-        preferences: {
-          WHATSAPP: { channel: 'WHATSAPP', marketingAllowed: true, transactionalAllowed: true },
-          EMAIL: { channel: 'EMAIL', marketingAllowed: true, transactionalAllowed: true },
-          SMS: { channel: 'SMS', marketingAllowed: true, transactionalAllowed: true }
-        },
-        isGloballyBlocked: false
-      }));
+      const E164_REGEX = /^\+[1-9][0-9]{7,14}$/;
+
+      // Filter rows based on duplicate policy and validity
+      const targetRows = rows.filter((r: any) => {
+        if (!r || !r.phone || String(r.phone).trim().length === 0) return false;
+        if (r.status === 'INVALID') return false;
+        if (duplicatePolicy === 'SKIP' && r.isDuplicate) return false;
+
+        const norm = DataQualityEngine.normalizePhone(String(r.phone));
+        if (!norm.canonical || !E164_REGEX.test(norm.canonical)) return false;
+        return true;
+      });
+
+      const contactsToInsert: Array<Omit<Contact, 'id' | 'createdAt' | 'updatedAt'>> = targetRows.map((r: any) => {
+        const norm = DataQualityEngine.normalizePhone(String(r.phone));
+        const canonicalPhone = norm.canonical;
+
+        return {
+          tenantId: req.auth!.tenant.id,
+          firstName: sanitizeSpreadsheetCell(r.name ? r.name.split(' ')[0] : 'Unknown'),
+          lastName: sanitizeSpreadsheetCell(r.name ? r.name.split(' ').slice(1).join(' ') : ''),
+          displayName: sanitizeSpreadsheetCell(r.name || 'Unknown'),
+          companyName: sanitizeSpreadsheetCell(r.company || ''),
+          jobTitle: sanitizeSpreadsheetCell(r.jobTitle || 'Buyer'),
+          phone: canonicalPhone,
+          email: r.email || '',
+          city: sanitizeSpreadsheetCell(r.city || ''),
+          state: r.state || 'Telangana',
+          country: r.country || 'India',
+          status: 'ACTIVE',
+          source: sourceFileName,
+          leadStatus: leadStatus || 'LEAD',
+          notes: `Imported via ${sourceFileName} with duplicate policy ${duplicatePolicy}`,
+          tags: ['IMPORTED', ...(r.city ? [String(r.city).toUpperCase()] : []), ...(leadStatus !== 'LEAD' ? [leadStatus.toUpperCase()] : [])],
+          customFields: r.customFields || {},
+          channelAddresses: [
+            { id: `addr-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`, channelType: 'WHATSAPP', address: canonicalPhone, isPrimary: true, isVerified: norm.isMobile },
+            { id: `addr-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`, channelType: 'EMAIL', address: r.email, isPrimary: true, isVerified: !!r.email }
+          ],
+          preferences: {
+            WHATSAPP: { channel: 'WHATSAPP', marketingAllowed: norm.isMobile, transactionalAllowed: true },
+            EMAIL: { channel: 'EMAIL', marketingAllowed: true, transactionalAllowed: true },
+            SMS: { channel: 'SMS', marketingAllowed: true, transactionalAllowed: true }
+          },
+          isGloballyBlocked: false
+        };
+      });
 
       const result = await db.contactsRepo.bulkCreate(contactsToInsert);
-      await logAudit('CONTACT_IMPORTED', 'IMPORT', `imp-${Date.now()}`, { count: contactsToInsert.length, ...result }, req);
+
+      // If a target audience segment list was specified, map the imported contacts to it in PostgreSQL
+      if (targetListId) {
+        try {
+          const insertedPhones = contactsToInsert.map(c => c.phone);
+          const client = (db as any).getClient();
+          const { data: matchedContacts } = await client
+            .from('contacts')
+            .select('id')
+            .eq('tenant_id', req.auth!.tenant.id)
+            .in('phone', insertedPhones);
+
+          if (matchedContacts && matchedContacts.length > 0) {
+            const memberRows = matchedContacts.map((c: any) => ({
+              tenant_id: req.auth!.tenant.id,
+              list_id: targetListId,
+              contact_id: c.id
+            }));
+            const CHUNK = 200;
+            for (let i = 0; i < memberRows.length; i += CHUNK) {
+              const chunk = memberRows.slice(i, i + CHUNK);
+              await client
+                .from('contact_list_members')
+                .upsert(chunk, { onConflict: 'tenant_id, list_id, contact_id', ignoreDuplicates: true });
+            }
+          }
+        } catch (linkErr) {
+          console.warn('Failed to link imported contacts to target list:', linkErr);
+        }
+      }
+
+      await logAudit('CONTACT_IMPORTED', 'IMPORT', `imp-${Date.now()}`, { count: contactsToInsert.length, targetListId, leadStatus, ...result }, req);
 
       res.json({ data: result });
     } catch (err) {
@@ -604,6 +742,42 @@ api.post(
   }
 );
 
+api.post(
+  '/contact-lists/:id/members',
+  requireRole(['OWNER', 'ADMIN', 'MANAGER', 'OPERATOR']),
+  async (req: AuthenticatedRequest, res: Response) => {
+    try {
+      const { contactIds } = req.body;
+      const listId = req.params.id;
+      const tenantId = req.auth!.tenant.id;
+      if (!Array.isArray(contactIds) || contactIds.length === 0) {
+        return res.status(400).json({ error: { message: 'No contact IDs provided' } });
+      }
+
+      const client = (db as any).getClient();
+      const memberRows = contactIds.map(cid => ({
+        tenant_id: tenantId,
+        list_id: listId,
+        contact_id: cid
+      }));
+
+      // Chunked insert into junction table
+      const CHUNK = 200;
+      for (let i = 0; i < memberRows.length; i += CHUNK) {
+        const chunk = memberRows.slice(i, i + CHUNK);
+        await client
+          .from('contact_list_members')
+          .upsert(chunk, { onConflict: 'tenant_id, list_id, contact_id', ignoreDuplicates: true });
+      }
+
+      await logAudit('LIST_MEMBERS_ADDED', 'WORKSPACE', listId, { count: contactIds.length }, req);
+      res.json({ success: true, count: contactIds.length });
+    } catch (err) {
+      handleDatabaseError(err, res);
+    }
+  }
+);
+
 // ---------------- 7. Message Templates (with Versioning) ----------------
 api.get('/templates', async (req: AuthenticatedRequest, res: Response) => {
   try {
@@ -631,7 +805,7 @@ api.post(
         availableVariables: vars as string[],
         attachmentName,
         category: category || 'INTRODUCTION',
-        createdBy: req.auth!.user.name
+        createdBy: req.auth!.user.id
       });
 
       await logAudit('TEMPLATE_CREATED', 'TEMPLATE', template.id, { name, version: template.version }, req);
@@ -642,14 +816,136 @@ api.post(
   }
 );
 
+// Helper: Synchronize a campaign and all non-sent recipients with an updated template
+async function syncCampaignRecipientsWithTemplate(
+  campaignId: string,
+  tenantId: string,
+  template: any
+): Promise<number> {
+  const client = (db as any).getClient();
+
+  // 1. Update the campaign's templateSnapshot and version
+  await db.campaignsRepo.update(
+    campaignId,
+    {
+      templateSnapshot: template,
+      templateVersion: template.version
+    },
+    tenantId
+  );
+
+  // 2. Fetch all active/pending recipients for this campaign
+  const { data: recipients, error: recError } = await client
+    .from('campaign_recipients')
+    .select('id, contact_id, channel')
+    .eq('campaign_id', campaignId)
+    .in('status', ['READY', 'QUEUED', 'OPENED']);
+
+  if (recError || !recipients || recipients.length === 0) return 0;
+
+  // 3. Batch fetch corresponding contacts
+  const contactIds = Array.from(new Set(recipients.map((r: any) => r.contact_id)));
+  const contactsMap = new Map<string, any>();
+
+  const CHUNK = 200;
+  for (let i = 0; i < contactIds.length; i += CHUNK) {
+    const chunkIds = contactIds.slice(i, i + CHUNK);
+    const { data: contactsData } = await client
+      .from('contacts')
+      .select('*')
+      .eq('tenant_id', tenantId)
+      .in('id', chunkIds);
+    if (contactsData) {
+      contactsData.forEach((c: any) => contactsMap.set(c.id, c));
+    }
+  }
+
+  // 4. Resolve template variables for each recipient
+  const updates: Array<{ id: string; resolved_message: string; resolved_subject?: string; attachment_name?: string }> = [];
+  for (const r of recipients) {
+    const c = contactsMap.get(r.contact_id);
+    if (!c) continue;
+
+    const contactData: Record<string, string> = {
+      first_name: c.first_name || '',
+      last_name: c.last_name || '',
+      name: c.display_name || '',
+      company_name: c.company_name || '',
+      company: c.company_name || '',
+      city: c.city || '',
+      state: c.state || '',
+      phone: c.phone || '',
+      email: c.email || '',
+      ...(c.custom_fields || {})
+    };
+
+    const { resolved } = DataQualityEngine.resolveTemplateVariables(template.body, contactData);
+    const resolvedSub = template.subject
+      ? DataQualityEngine.resolveTemplateVariables(template.subject, contactData).resolved
+      : undefined;
+
+    updates.push({
+      id: r.id,
+      resolved_message: resolved,
+      resolved_subject: resolvedSub,
+      attachment_name: template.attachmentName
+    });
+  }
+
+  // 5. Update recipients in chunks of 50
+  const UPDATE_CHUNK = 50;
+  for (let i = 0; i < updates.length; i += UPDATE_CHUNK) {
+    const chunk = updates.slice(i, i + UPDATE_CHUNK);
+    await Promise.all(
+      chunk.map(u =>
+        client
+          .from('campaign_recipients')
+          .update({
+            resolved_message: u.resolved_message,
+            resolved_subject: u.resolved_subject,
+            attachment_name: u.attachment_name,
+            updated_at: new Date().toISOString()
+          })
+          .eq('id', u.id)
+      )
+    );
+  }
+
+  return updates.length;
+}
+
 api.put(
   '/templates/:id',
   requireRole(['OWNER', 'ADMIN', 'MANAGER']),
   async (req: AuthenticatedRequest, res: Response) => {
     try {
       const updated = await db.templatesRepo.update(req.params.id, req.body, req.auth!.tenant.id);
-      await logAudit('TEMPLATE_UPDATED', 'TEMPLATE', updated.id, { name: updated.name, newVersion: updated.version }, req);
-      res.json({ data: updated });
+      const tenantId = req.auth!.tenant.id;
+      const client = (db as any).getClient();
+
+      // Automatically cascade updated template body/subject to all active/draft/review/paused campaigns using this template
+      const { data: affectedCampaigns } = await client
+        .from('campaigns')
+        .select('id')
+        .eq('tenant_id', tenantId)
+        .eq('template_id', req.params.id)
+        .neq('status', 'COMPLETED');
+
+      let syncedRecipientsCount = 0;
+      if (affectedCampaigns && affectedCampaigns.length > 0) {
+        for (const camp of affectedCampaigns) {
+          syncedRecipientsCount += await syncCampaignRecipientsWithTemplate(camp.id, tenantId, updated);
+        }
+      }
+
+      await logAudit('TEMPLATE_UPDATED', 'TEMPLATE', updated.id, { 
+        name: updated.name, 
+        newVersion: updated.version,
+        affectedCampaignsCount: affectedCampaigns?.length || 0,
+        syncedRecipientsCount
+      }, req);
+
+      res.json({ data: updated, syncedCampaignsCount: affectedCampaigns?.length || 0, syncedRecipientsCount });
     } catch (err) {
       handleDatabaseError(err, res);
     }
@@ -723,8 +1019,8 @@ api.post(
           attachmentName: template.attachmentName
         },
         isDryRun: !!isDryRun,
-        createdBy: req.auth!.user.name,
-        assignedOperator: req.auth!.user.name
+        createdBy: req.auth!.user.id,
+        assignedOperator: req.auth!.user.id
       });
 
       const recipientEntries: Array<Omit<CampaignRecipient, 'id' | 'createdAt'>> = [];
@@ -746,6 +1042,7 @@ api.post(
         const resolvedSub = template.subject ? DataQualityEngine.resolveTemplateVariables(template.subject, contactData).resolved : undefined;
 
         recipientEntries.push({
+          tenantId: req.auth!.tenant.id,
           campaignId: campaign.id,
           contactId: c.id,
           contactName: c.displayName,
@@ -759,7 +1056,7 @@ api.post(
         });
       }
 
-      await db.campaignsRepo.addRecipients(recipientEntries);
+      await db.campaignsRepo.addRecipients(recipientEntries, req.auth!.tenant.id);
       const updatedCampaign = await db.campaignsRepo.update(
         campaign.id,
         { recipientsCount: recipientEntries.length },
@@ -820,8 +1117,11 @@ api.post('/campaigns/:id/status', async (req: AuthenticatedRequest, res: Respons
 
     const updates: Partial<typeof campaign> = { status: newStatus };
     if (newStatus === 'APPROVED') {
-      updates.approvedBy = `${user.name} (${req.auth!.role})`;
+      updates.approvedBy = user.id;
       updates.approvedAt = new Date().toISOString();
+    } else if (newStatus === 'DRAFT') {
+      updates.approvedBy = null as any;
+      updates.approvedAt = null as any;
     } else if (newStatus === 'ACTIVE' && !campaign.startedAt) {
       updates.startedAt = new Date().toISOString();
     } else if (newStatus === 'COMPLETED') {
@@ -835,6 +1135,54 @@ api.post('/campaigns/:id/status', async (req: AuthenticatedRequest, res: Respons
     handleDatabaseError(err, res);
   }
 });
+
+api.delete(
+  '/campaigns/:id',
+  requireRole(['OWNER', 'ADMIN', 'MANAGER']),
+  async (req: AuthenticatedRequest, res: Response) => {
+    try {
+      const campaign = await db.campaignsRepo.findById(req.params.id, req.auth!.tenant.id);
+      if (!campaign) {
+        return res.json({ success: true, message: 'Campaign already deleted' });
+      }
+
+      await db.campaignsRepo.delete(req.params.id, req.auth!.tenant.id);
+      await logAudit('CAMPAIGN_DELETED', 'CAMPAIGN', req.params.id, { name: campaign.name }, req);
+      res.json({ success: true });
+    } catch (err) {
+      handleDatabaseError(err, res);
+    }
+  }
+);
+
+api.post(
+  '/campaigns/:id/sync-template',
+  requireRole(['OWNER', 'ADMIN', 'MANAGER', 'OPERATOR']),
+  async (req: AuthenticatedRequest, res: Response) => {
+    try {
+      const campaign = await db.campaignsRepo.findById(req.params.id, req.auth!.tenant.id);
+      if (!campaign) return res.status(404).json({ error: { message: 'Campaign not found' } });
+      if (!campaign.templateId) return res.status(400).json({ error: { message: 'Campaign has no linked template' } });
+
+      const template = await db.templatesRepo.findById(campaign.templateId, req.auth!.tenant.id);
+      if (!template) return res.status(404).json({ error: { message: 'Linked template not found' } });
+
+      const updatedCount = await syncCampaignRecipientsWithTemplate(campaign.id, req.auth!.tenant.id, template);
+      const updatedCampaign = await db.campaignsRepo.findById(campaign.id, req.auth!.tenant.id);
+      const recipients = await db.campaignsRepo.getRecipients(campaign.id);
+
+      await logAudit('CAMPAIGN_TEMPLATE_SYNCED', 'CAMPAIGN', campaign.id, { 
+        templateId: template.id, 
+        version: template.version,
+        recipientsUpdated: updatedCount 
+      }, req);
+
+      res.json({ data: { ...updatedCampaign, recipients, updatedCount } });
+    } catch (err) {
+      handleDatabaseError(err, res);
+    }
+  }
+);
 
 // ---------------- 9. Manual Sending Workspace Engine ----------------
 api.post(
@@ -878,7 +1226,7 @@ api.post(
       }
 
       await db.campaignsRepo.updateRecipient(recipientId, {
-        claimedByOperator: req.auth!.user.name,
+        claimedByOperator: req.auth!.user.id,
         claimedAt: new Date().toISOString()
       });
 
@@ -909,8 +1257,11 @@ api.post(
 
       await db.contactsRepo.addTimelineEvent({
         contactId: contact.id,
+        tenantId: req.auth!.tenant.id,
         eventType: recipient.channel === 'WHATSAPP' ? 'WHATSAPP_OPENED' : 'EMAIL_OPENED',
         actor: req.auth!.user.name,
+        actorId: req.auth!.user.id,
+        actorName: req.auth!.user.name,
         campaignName: campaign.name,
         description: `Official ${recipient.channel} composer opened for manual review`
       });
@@ -953,8 +1304,11 @@ api.post(
         );
         await db.contactsRepo.addTimelineEvent({
           contactId: contact.id,
+          tenantId: req.auth!.tenant.id,
           eventType: 'USER_MARKED_SENT',
           actor: req.auth!.user.name,
+          actorId: req.auth!.user.id,
+          actorName: req.auth!.user.name,
           campaignName: campaign.name,
           description: `Operator confirmed message sent via ${recipient.channel} to ${recipient.channelAddress}`
         });
@@ -1134,16 +1488,10 @@ export async function startServer(port = PORT) {
   });
 }
 
-const isDirectRun = Boolean(
-  process.argv[1] && (
-    fileURLToPath(import.meta.url) === process.argv[1] ||
-    process.argv[1].endsWith('/server.ts') ||
-    process.argv[1].endsWith('\\server.ts')
-  )
-);
-
-if (isDirectRun && process.env.NODE_ENV !== 'test') {
-  startServer();
+if (process.env.NODE_ENV !== 'test' && !process.env.VERCEL) {
+  startServer().catch(err => {
+    console.error('[ReachOut OS Server] Failed to start:', err);
+  });
 }
 
 export { app, api };

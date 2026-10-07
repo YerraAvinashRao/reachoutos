@@ -47,17 +47,26 @@ export const ManualSendingWorkspace: React.FC<ManualSendingWorkspaceProps> = ({
   onPauseCampaign,
   userRole
 }) => {
-  // Find first unsent or active index
-  const initialIndex = Math.max(0, recipients.findIndex(r => r.status === 'READY' || r.status === 'OPENED'));
-  const [currentIndex, setCurrentIndex] = useState(initialIndex !== -1 ? initialIndex : 0);
+  // Find first unsent or active recipient ID
+  const [selectedRecipientId, setSelectedRecipientId] = useState<string | null>(() => {
+    const firstActive = recipients.find(r => r.status === 'READY' || r.status === 'OPENED') || recipients[0];
+    return firstActive?.id || null;
+  });
   const [copied, setCopied] = useState(false);
   const [policyModalOpen, setPolicyModalOpen] = useState(false);
   const [policyReasons, setPolicyReasons] = useState<any[]>([]);
   const [loadingAction, setLoadingAction] = useState(false);
   const [lastOpenedAt, setLastOpenedAt] = useState<string | null>(null);
 
-  const currentRecipient = recipients[currentIndex];
+  // Compute current index and recipient safely by ID so background updates never shift contacts
+  const activeIdx = recipients.findIndex(r => r.id === selectedRecipientId);
+  const currentIndex = activeIdx !== -1 ? activeIdx : 0;
+  const currentRecipient = recipients[currentIndex] || null;
   const currentContact = contacts.find(c => c.id === currentRecipient?.contactId);
+
+  const isSent = currentRecipient?.status === 'USER_SENT';
+  const isOpened = currentRecipient?.status === 'OPENED';
+  const isSuppressed = currentRecipient?.status === 'BLOCKED' || currentRecipient?.status === 'OPTED_OUT' || currentContact?.isGloballyBlocked;
 
   // Completed metrics
   const total = recipients.length;
@@ -65,42 +74,63 @@ export const ManualSendingWorkspace: React.FC<ManualSendingWorkspaceProps> = ({
   const skippedCount = recipients.filter(r => r.status === 'SKIPPED').length;
   const progressPct = Math.round((sentCount / (total || 1)) * 100);
 
-  // Trigger Open Composer
-  const handleOpenChannel = useCallback(async () => {
-    if (!currentRecipient || userRole === 'VIEWER') return;
-    setLoadingAction(true);
-    try {
-      const res = await onPrepare(currentRecipient.id);
-      if (res?.data?.prepared?.deepLinkUrl) {
-        // Legitimate browser navigation to official composer
-        window.open(res.data.prepared.deepLinkUrl, '_blank');
-        setLastOpenedAt(new Date().toLocaleTimeString());
-      } else if (res?.error?.policyResult) {
-        setPolicyReasons(res.error.policyResult.reasons || []);
-        setPolicyModalOpen(true);
-      }
-    } catch (err: any) {
-      console.error(err);
-    } finally {
-      setLoadingAction(false);
+  // Queue navigation functions
+  const advanceToNext = useCallback(() => {
+    if (currentIndex < recipients.length - 1) {
+      setSelectedRecipientId(recipients[currentIndex + 1].id);
+    } else {
+      setSelectedRecipientId(null);
     }
-  }, [currentRecipient, userRole, onPrepare]);
+    setLastOpenedAt(null);
+  }, [recipients, currentIndex]);
 
-  // Mark Sent and auto-advance
+  const goToPrevious = useCallback(() => {
+    if (currentIndex > 0) {
+      setSelectedRecipientId(recipients[currentIndex - 1].id);
+      setLastOpenedAt(null);
+    }
+  }, [recipients, currentIndex]);
+
+  // Direct instant deep-link URL calculation
+  const getDeepLinkUrl = useCallback((r?: CampaignRecipient | null) => {
+    if (!r) return '';
+    const phoneDigits = (r.channelAddress || '').replace(/\D/g, '');
+    const encodedBody = encodeURIComponent(r.resolvedMessage || '');
+    if (campaign.channel === 'WHATSAPP') {
+      return `https://wa.me/${phoneDigits}?text=${encodedBody}`;
+    }
+    const encodedSubject = encodeURIComponent(r.resolvedSubject || '');
+    return `mailto:${r.channelAddress}?subject=${encodedSubject}&body=${encodedBody}`;
+  }, [campaign.channel]);
+
+  // Trigger Open Composer (Opening does NOT mark sent and does NOT advance)
+  const handleOpenChannel = useCallback(async () => {
+    if (!currentRecipient || userRole === 'VIEWER' || isSuppressed) return;
+    const directUrl = getDeepLinkUrl(currentRecipient);
+    if (directUrl) {
+      window.open(directUrl, '_blank', 'noopener,noreferrer');
+      setLastOpenedAt(new Date().toLocaleTimeString());
+    }
+    try {
+      await onPrepare(currentRecipient.id);
+    } catch (err: any) {
+      console.warn('onPrepare background sync:', err);
+    }
+  }, [currentRecipient, userRole, isSuppressed, getDeepLinkUrl, onPrepare]);
+
+  // Mark Sent: ONLY explicit operator action marks as sent and advances
   const handleMarkSent = useCallback(async () => {
     if (!currentRecipient || userRole === 'VIEWER') return;
     setLoadingAction(true);
     try {
       await onMarkSent(currentRecipient.id);
-      if (currentIndex < recipients.length - 1) {
-        setCurrentIndex(prev => prev + 1);
-      }
+      advanceToNext();
     } catch (err) {
       console.error(err);
     } finally {
       setLoadingAction(false);
     }
-  }, [currentRecipient, userRole, onMarkSent, currentIndex, recipients.length]);
+  }, [currentRecipient, userRole, onMarkSent, advanceToNext]);
 
   // Skip and advance
   const handleSkip = useCallback(async () => {
@@ -108,34 +138,30 @@ export const ManualSendingWorkspace: React.FC<ManualSendingWorkspaceProps> = ({
     setLoadingAction(true);
     try {
       await onSkip(currentRecipient.id, 'Manually skipped in focus workspace');
-      if (currentIndex < recipients.length - 1) {
-        setCurrentIndex(prev => prev + 1);
-      }
+      advanceToNext();
     } catch (err) {
       console.error(err);
     } finally {
       setLoadingAction(false);
     }
-  }, [currentRecipient, userRole, onSkip, currentIndex, recipients.length]);
+  }, [currentRecipient, userRole, onSkip, advanceToNext]);
 
-  // Block contact
+  // Block contact and advance
   const handleBlock = useCallback(async () => {
-    if (!currentContact || userRole === 'VIEWER') return;
+    if (!currentContact || !currentRecipient || userRole === 'VIEWER') return;
     if (window.confirm(`Globally block and suppress ${currentContact.displayName}? This stops all future outreach across all channels.`)) {
       setLoadingAction(true);
       try {
         await onToggleBlock(currentContact.id, 'Suppressed during campaign review');
         await onSkip(currentRecipient.id, 'Contact globally suppressed');
-        if (currentIndex < recipients.length - 1) {
-          setCurrentIndex(prev => prev + 1);
-        }
+        advanceToNext();
       } catch (err) {
         console.error(err);
       } finally {
         setLoadingAction(false);
       }
     }
-  }, [currentContact, currentRecipient, userRole, onToggleBlock, onSkip, currentIndex, recipients.length]);
+  }, [currentContact, currentRecipient, userRole, onToggleBlock, onSkip, advanceToNext]);
 
   // Copy message
   const handleCopyMessage = () => {
@@ -171,16 +197,16 @@ export const ManualSendingWorkspace: React.FC<ManualSendingWorkspaceProps> = ({
         handleCopyMessage();
       } else if (key === 'N') {
         e.preventDefault();
-        if (currentIndex < recipients.length - 1) setCurrentIndex(prev => prev + 1);
+        advanceToNext();
       } else if (key === 'P') {
         e.preventDefault();
-        if (currentIndex > 0) setCurrentIndex(prev => prev - 1);
+        goToPrevious();
       }
     };
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [handleOpenChannel, handleMarkSent, handleSkip, handleBlock, currentIndex, recipients.length]);
+  }, [handleOpenChannel, handleMarkSent, handleSkip, handleBlock, advanceToNext, goToPrevious]);
 
   if (!currentRecipient) {
     return (
@@ -202,10 +228,6 @@ export const ManualSendingWorkspace: React.FC<ManualSendingWorkspaceProps> = ({
     );
   }
 
-  const isSent = currentRecipient.status === 'USER_SENT';
-  const isOpened = currentRecipient.status === 'OPENED';
-  const isSuppressed = currentRecipient.status === 'BLOCKED' || currentRecipient.status === 'OPTED_OUT' || currentContact?.isGloballyBlocked;
-
   return (
     <div className="max-w-4xl mx-auto space-y-4">
       {/* Top Bar: Progress & Emergency Pause */}
@@ -224,7 +246,7 @@ export const ManualSendingWorkspace: React.FC<ManualSendingWorkspaceProps> = ({
             {campaign.name}
           </div>
           <div className="text-[11px] font-mono text-neutral-500">
-            Recipient {currentIndex + 1} of {total} ({progressPct}% Dispatched)
+            Recipient {currentIndex + 1} of {total} • <strong className="text-emerald-600 dark:text-emerald-400">{sentCount} Confirmed Sent</strong> • {total - sentCount - skippedCount} Remaining
           </div>
         </div>
 
@@ -240,15 +262,15 @@ export const ManualSendingWorkspace: React.FC<ManualSendingWorkspaceProps> = ({
       </div>
 
       {/* Progress Line */}
-      <div className="w-full bg-neutral-200 dark:bg-neutral-800 h-1 rounded-full overflow-hidden">
+      <div className="w-full bg-neutral-200 dark:bg-neutral-800 h-1.5 rounded-full overflow-hidden">
         <div
-          className="bg-emerald-600 h-1 transition-all duration-300"
+          className="bg-emerald-600 h-1.5 transition-all duration-300"
           style={{ width: `${progressPct}%` }}
         />
       </div>
 
       {/* MAIN DISPATCH CARD */}
-      <div className="p-6 rounded-2xl border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 shadow-xl space-y-5">
+      <div className="p-4 sm:p-6 rounded-2xl border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 shadow-xl space-y-4 sm:space-y-5">
         {/* Contact Info Header */}
         <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-3 border-b border-neutral-100 dark:border-neutral-800 pb-4">
           <div className="space-y-1">
@@ -256,16 +278,37 @@ export const ManualSendingWorkspace: React.FC<ManualSendingWorkspaceProps> = ({
               <h2 className="text-lg font-bold text-neutral-900 dark:text-neutral-100">
                 {currentRecipient.contactName}
               </h2>
-              <span className={`px-2 py-0.5 rounded text-[10px] font-mono font-medium ${
+              <span className={`px-2.5 py-0.5 rounded text-[10px] font-mono font-bold flex items-center gap-1 ${
                 isSent
-                  ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-400'
+                  ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-400 border border-emerald-300 dark:border-emerald-800'
                   : isOpened
-                  ? 'bg-blue-100 text-blue-800 dark:bg-blue-950 dark:text-blue-400'
+                  ? 'bg-blue-100 text-blue-800 dark:bg-blue-950 dark:text-blue-300 border border-blue-300 dark:border-blue-800'
                   : isSuppressed
-                  ? 'bg-rose-100 text-rose-800 dark:bg-rose-950 dark:text-rose-400'
-                  : 'bg-neutral-100 text-neutral-700 dark:bg-neutral-800 dark:text-neutral-300'
+                  ? 'bg-rose-100 text-rose-800 dark:bg-rose-950 dark:text-rose-400 border border-rose-300 dark:border-rose-800'
+                  : currentRecipient.status === 'SKIPPED'
+                  ? 'bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-400 border border-amber-300 dark:border-amber-800'
+                  : 'bg-neutral-100 text-neutral-700 dark:bg-neutral-800 dark:text-neutral-300 border border-neutral-200 dark:border-neutral-700'
               }`}>
-                {currentRecipient.status}
+                {isSent ? (
+                  <>
+                    <CheckCircle2 className="w-3 h-3 text-emerald-600" />
+                    <span>CONFIRMED SENT</span>
+                  </>
+                ) : isOpened ? (
+                  <>
+                    <Clock className="w-3 h-3 text-blue-600 animate-pulse" />
+                    <span>OPENED (AWAITING SEND)</span>
+                  </>
+                ) : isSuppressed ? (
+                  <>
+                    <AlertCircle className="w-3 h-3 text-rose-600" />
+                    <span>SUPPRESSED / BLOCKED</span>
+                  </>
+                ) : currentRecipient.status === 'SKIPPED' ? (
+                  <span>SKIPPED</span>
+                ) : (
+                  <span>READY TO SEND</span>
+                )}
               </span>
             </div>
 
@@ -296,6 +339,22 @@ export const ManualSendingWorkspace: React.FC<ManualSendingWorkspaceProps> = ({
             ))}
           </div>
         </div>
+
+        {/* Guided Banner: Shown when composer is opened, clarifying that message is NOT sent yet */}
+        {isOpened && !isSent && (
+          <div className="p-3.5 rounded-xl border border-blue-200 dark:border-blue-900 bg-blue-50/70 dark:bg-blue-950/30 text-xs text-blue-900 dark:text-blue-300 flex items-start gap-3 shadow-xs">
+            <Clock className="w-4 h-4 text-blue-600 dark:text-blue-400 shrink-0 mt-0.5 animate-pulse" />
+            <div className="space-y-0.5">
+              <div className="font-bold flex items-center gap-2">
+                <span>WhatsApp Composer Opened in Tab</span>
+                <span className="text-[10px] px-1.5 py-0.2 rounded bg-blue-200/80 dark:bg-blue-900 font-mono text-blue-900 dark:text-blue-200 font-semibold">Step 1 Completed</span>
+              </div>
+              <p className="text-[11px] text-blue-800 dark:text-blue-300 leading-relaxed">
+                The deep link was opened. Please switch to the WhatsApp tab, inspect the recipient, and manually hit Send. Once sent, click <strong>"2. Mark Sent (S)"</strong> below to record confirmation and advance to the next contact.
+              </p>
+            </div>
+          </div>
+        )}
 
         {/* Attachment Alert Banner (Strict Human-in-the-Loop requirement) */}
         {currentRecipient.attachmentName && (
@@ -336,7 +395,7 @@ export const ManualSendingWorkspace: React.FC<ManualSendingWorkspaceProps> = ({
           <div className="flex items-center gap-1.5">
             <Clock className="w-3.5 h-3.5" />
             <span>
-              {lastOpenedAt ? `Composer opened at ${lastOpenedAt}` : 'Composer not yet loaded for this recipient'}
+              {lastOpenedAt ? `Composer opened at ${lastOpenedAt} (Pending Send Confirmation)` : isOpened ? 'Composer opened (Pending Send Confirmation)' : 'Ready for outreach — Click Step 1 to open composer'}
             </span>
           </div>
 
@@ -352,76 +411,99 @@ export const ManualSendingWorkspace: React.FC<ManualSendingWorkspaceProps> = ({
         </div>
 
         {/* Primary Action Buttons */}
-        <div className="pt-3 border-t border-neutral-100 dark:border-neutral-800 flex flex-wrap items-center justify-between gap-3">
-          {/* Navigation (Prev / Next) */}
-          <div className="flex items-center gap-1.5">
-            <button
-              onClick={() => currentIndex > 0 && setCurrentIndex(prev => prev - 1)}
-              disabled={currentIndex === 0}
-              className="px-2.5 py-1.5 rounded-md border border-neutral-200 dark:border-neutral-700 text-xs font-medium text-neutral-600 dark:text-neutral-300 disabled:opacity-40 hover:bg-neutral-50 dark:hover:bg-neutral-800 transition"
-              title="Previous (P)"
-            >
-              ← Prev
-            </button>
-            <button
-              onClick={() => currentIndex < recipients.length - 1 && setCurrentIndex(prev => prev + 1)}
-              disabled={currentIndex === recipients.length - 1}
-              className="px-2.5 py-1.5 rounded-md border border-neutral-200 dark:border-neutral-700 text-xs font-medium text-neutral-600 dark:text-neutral-300 disabled:opacity-40 hover:bg-neutral-50 dark:hover:bg-neutral-800 transition"
-              title="Next (N)"
-            >
-              Next →
-            </button>
-          </div>
-
-          {/* Action Trio */}
-          <div className="flex items-center gap-2">
-            {/* Skip */}
-            <button
-              onClick={handleSkip}
-              disabled={loadingAction || userRole === 'VIEWER'}
-              className="px-3 py-2 rounded-lg border border-neutral-200 dark:border-neutral-700 text-neutral-600 dark:text-neutral-300 text-xs font-medium hover:bg-neutral-100 dark:hover:bg-neutral-800 transition"
-              title="Skip (K)"
-            >
-              Skip (K)
-            </button>
-
-            {/* Block / Do Not Contact */}
-            <button
-              onClick={handleBlock}
-              disabled={loadingAction || userRole === 'VIEWER'}
-              className="px-3 py-2 rounded-lg border border-rose-200 dark:border-rose-900/60 text-rose-600 dark:text-rose-400 text-xs font-medium hover:bg-rose-50 dark:hover:bg-rose-950/30 transition"
-              title="Block / Do Not Contact (B)"
-            >
-              Block (B)
-            </button>
-
+        <div className="pt-3 border-t border-neutral-100 dark:border-neutral-800 space-y-3">
+          {/* Main Dispatch Steps (Large Thumb Touch Targets on Mobile) */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
             {/* 1. Open WhatsApp / Email */}
-            <button
-              onClick={handleOpenChannel}
-              disabled={loadingAction || isSuppressed || userRole === 'VIEWER'}
-              className="px-4 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-semibold text-xs flex items-center gap-1.5 shadow-sm transition disabled:opacity-50"
-              title="Open Official Composer (W)"
+            <a
+              href={!isSuppressed && userRole !== 'VIEWER' ? getDeepLinkUrl(currentRecipient) : undefined}
+              target="_blank"
+              rel="noopener noreferrer"
+              onClick={(e) => {
+                if (isSuppressed || userRole === 'VIEWER') {
+                  e.preventDefault();
+                  return;
+                }
+                setLastOpenedAt(new Date().toLocaleTimeString());
+                onPrepare(currentRecipient.id).catch(console.warn);
+              }}
+              className={`py-3 px-4 rounded-xl font-bold text-xs sm:text-sm flex items-center justify-center gap-2 shadow-sm transition cursor-pointer select-none ${
+                isSuppressed || userRole === 'VIEWER'
+                  ? 'opacity-50 pointer-events-none bg-neutral-200 dark:bg-neutral-800 text-neutral-500'
+                  : isOpened
+                  ? 'border-2 border-blue-400 dark:border-blue-600 bg-blue-50 dark:bg-blue-950/50 text-blue-700 dark:text-blue-300 hover:bg-blue-100'
+                  : 'bg-emerald-600 hover:bg-emerald-700 active:scale-[0.98] text-white ring-2 ring-emerald-500/40 shadow-emerald-600/20 shadow-md'
+              }`}
+              title={`Open Official ${campaign.channel} (W)`}
             >
-              <ExternalLink className="w-3.5 h-3.5" />
-              <span>Open {campaign.channel} (W)</span>
-            </button>
+              <ExternalLink className="w-4 h-4" />
+              <span>{isOpened ? `1. Re-open ${campaign.channel}` : `1. Open ${campaign.channel}`}</span>
+            </a>
 
-            {/* 2. Mark Sent */}
+            {/* 2. Mark Sent: Verified by operator */}
             <button
               onClick={handleMarkSent}
               disabled={loadingAction || userRole === 'VIEWER'}
-              className="px-4 py-2 rounded-lg bg-neutral-900 dark:bg-white text-white dark:text-neutral-900 font-bold text-xs flex items-center gap-1.5 shadow-sm hover:bg-neutral-800 dark:hover:bg-neutral-100 transition disabled:opacity-50"
+              className={`py-3 px-4 rounded-xl font-bold text-xs sm:text-sm flex items-center justify-center gap-2 shadow-sm transition disabled:opacity-50 cursor-pointer select-none active:scale-[0.98] ${
+                isOpened
+                  ? 'bg-emerald-600 hover:bg-emerald-700 text-white ring-2 ring-emerald-400 shadow-emerald-600/30 shadow-lg'
+                  : 'bg-neutral-900 dark:bg-white text-white dark:text-neutral-900 hover:bg-neutral-800 dark:hover:bg-neutral-100 border border-neutral-300 dark:border-neutral-700'
+              }`}
               title="Confirm user transmitted message (S)"
             >
-              <CheckCircle2 className="w-3.5 h-3.5" />
-              <span>Mark Sent (S)</span>
+              <CheckCircle2 className="w-4 h-4" />
+              <span>{isOpened ? '2. Confirm Sent (S)' : '2. Mark Sent (S)'}</span>
             </button>
+          </div>
+
+          {/* Secondary Control Row: Navigation + Skip/Block */}
+          <div className="flex items-center justify-between gap-2 pt-1">
+            {/* Prev / Next */}
+            <div className="flex items-center gap-1.5">
+              <button
+                onClick={goToPrevious}
+                disabled={currentIndex === 0}
+                className="px-3 py-2 rounded-lg border border-neutral-200 dark:border-neutral-700 text-xs font-semibold text-neutral-700 dark:text-neutral-300 disabled:opacity-40 hover:bg-neutral-100 dark:hover:bg-neutral-800 transition cursor-pointer"
+                title="Previous (P)"
+              >
+                ← Prev
+              </button>
+              <button
+                onClick={advanceToNext}
+                disabled={currentIndex >= recipients.length - 1}
+                className="px-3 py-2 rounded-lg border border-neutral-200 dark:border-neutral-700 text-xs font-semibold text-neutral-700 dark:text-neutral-300 disabled:opacity-40 hover:bg-neutral-100 dark:hover:bg-neutral-800 transition cursor-pointer"
+                title="Next (N)"
+              >
+                Next →
+              </button>
+            </div>
+
+            {/* Skip & Block */}
+            <div className="flex items-center gap-1.5">
+              <button
+                onClick={handleSkip}
+                disabled={loadingAction || userRole === 'VIEWER'}
+                className="px-3 py-2 rounded-lg border border-neutral-200 dark:border-neutral-700 text-neutral-600 dark:text-neutral-300 text-xs font-medium hover:bg-neutral-100 dark:hover:bg-neutral-800 transition cursor-pointer"
+                title="Skip (K)"
+              >
+                Skip
+              </button>
+
+              <button
+                onClick={handleBlock}
+                disabled={loadingAction || userRole === 'VIEWER'}
+                className="px-3 py-2 rounded-lg border border-rose-200 dark:border-rose-900/60 text-rose-600 dark:text-rose-400 text-xs font-medium hover:bg-rose-50 dark:hover:bg-rose-950/30 transition cursor-pointer"
+                title="Block / Do Not Contact (B)"
+              >
+                Block
+              </button>
+            </div>
           </div>
         </div>
       </div>
 
-      {/* Keyboard Shortcut Ribbon */}
-      <div className="flex flex-wrap items-center justify-between gap-2 p-2.5 rounded-lg border border-neutral-100 dark:border-neutral-800 bg-neutral-50/60 dark:bg-neutral-900/40 text-[11px] text-neutral-500 font-mono">
+      {/* Keyboard Shortcut Ribbon (Desktop Only) */}
+      <div className="hidden sm:flex flex-wrap items-center justify-between gap-2 p-2.5 rounded-lg border border-neutral-100 dark:border-neutral-800 bg-neutral-50/60 dark:bg-neutral-900/40 text-[11px] text-neutral-500 font-mono">
         <div className="flex items-center gap-3">
           <span><kbd className="px-1 py-0.5 rounded bg-white dark:bg-neutral-800 border border-neutral-200 dark:border-neutral-700 text-neutral-800 dark:text-neutral-200 font-bold">W</kbd> Open WhatsApp</span>
           <span><kbd className="px-1 py-0.5 rounded bg-white dark:bg-neutral-800 border border-neutral-200 dark:border-neutral-700 text-neutral-800 dark:text-neutral-200 font-bold">S</kbd> Mark Sent</span>

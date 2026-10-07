@@ -177,8 +177,26 @@ class ApiClient {
     return json.data;
   }
 
+  async bulkUpdateContacts(contactIds: string[], updates: Record<string, any>) {
+    const json = await this.request('/api/v1/contacts/bulk-update', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ contactIds, updates })
+    });
+    return json.data;
+  }
+
   async deleteContact(id: string) {
     return this.request(`/api/v1/contacts/${id}`, { method: 'DELETE' });
+  }
+
+  async bulkDeleteContacts(contactIds: string[]) {
+    const json = await this.request('/api/v1/contacts/bulk-delete', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ contactIds })
+    });
+    return json.data;
   }
 
   async toggleContactBlock(id: string, reason?: string) {
@@ -209,11 +227,11 @@ class ApiClient {
     return json.data;
   }
 
-  async commitImport(rows: any[], duplicatePolicy: string, sourceFileName: string) {
+  async commitImport(rows: any[], duplicatePolicy: string, sourceFileName: string, leadStatus?: string, targetListId?: string) {
     const json = await this.request('/api/v1/imports/commit', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ rows, duplicatePolicy, sourceFileName })
+      body: JSON.stringify({ rows, duplicatePolicy, sourceFileName, leadStatus, targetListId })
     });
     return json.data;
   }
@@ -229,6 +247,15 @@ class ApiClient {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(data)
+    });
+    return json.data;
+  }
+
+  async addMembersToList(listId: string, contactIds: string[]) {
+    const json = await this.request(`/api/v1/contact-lists/${listId}/members`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ contactIds })
     });
     return json.data;
   }
@@ -286,6 +313,17 @@ class ApiClient {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ newStatus })
+    });
+    return json.data;
+  }
+
+  async deleteCampaign(id: string) {
+    return this.request(`/api/v1/campaigns/${id}`, { method: 'DELETE' });
+  }
+
+  async syncCampaignTemplate(id: string) {
+    const json = await this.request(`/api/v1/campaigns/${id}/sync-template`, {
+      method: 'POST'
     });
     return json.data;
   }

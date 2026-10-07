@@ -1,11 +1,12 @@
 import React, { useState } from 'react';
-import { ListFilter, Plus, Users, Send, CheckCircle2 } from 'lucide-react';
+import { ListFilter, Plus, Users, Send } from 'lucide-react';
 import { ContactList, Contact, Role } from '../types';
+import { CreateSegmentModal } from './CreateSegmentModal';
 
 interface ListsViewProps {
   lists: ContactList[];
   contacts: Contact[];
-  onCreateList: (data: any) => void;
+  onCreateList: (data: any) => Promise<void>;
   onLaunchCampaignForList: (listId: string) => void;
   userRole: Role;
 }
@@ -18,40 +19,6 @@ export const ListsView: React.FC<ListsViewProps> = ({
   userRole
 }) => {
   const [showModal, setShowModal] = useState(false);
-  const [formData, setFormData] = useState({
-    name: '',
-    description: '',
-    type: 'DYNAMIC' as 'STATIC' | 'DYNAMIC',
-    city: 'Nizamabad',
-    leadStatus: 'RETAILER',
-    tag: 'HONEY'
-  });
-
-  const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    // For demo dynamic rules
-    const matchingContacts = contacts.filter(c => {
-      if (formData.type === 'STATIC') return true;
-      let match = true;
-      if (formData.city && c.city.toLowerCase() !== formData.city.toLowerCase()) match = false;
-      if (formData.leadStatus && c.leadStatus !== formData.leadStatus) match = false;
-      return match;
-    });
-
-    onCreateList({
-      name: formData.name,
-      description: formData.description,
-      type: formData.type,
-      rules: {
-        city: formData.city,
-        leadStatus: formData.leadStatus,
-        hasWhatsApp: true,
-        marketingAllowed: true
-      },
-      contactIds: matchingContacts.map(c => c.id)
-    });
-    setShowModal(false);
-  };
 
   return (
     <div className="space-y-4">
@@ -61,7 +28,7 @@ export const ListsView: React.FC<ListsViewProps> = ({
             Target Audiences & Segments
           </h1>
           <p className="text-xs text-neutral-500 dark:text-neutral-400">
-            Static lead groups and dynamic rule-based filters (City, Channel, Consent)
+            Static contact groups and dynamic rule-based filters (City, Channel, Consent)
           </p>
         </div>
 
@@ -137,83 +104,19 @@ export const ListsView: React.FC<ListsViewProps> = ({
         })}
       </div>
 
-      {showModal && (
-        <div className="fixed inset-0 bg-neutral-950/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="w-full max-w-md bg-white dark:bg-neutral-900 rounded-xl border border-neutral-200 dark:border-neutral-800 shadow-2xl p-5 space-y-4">
-            <div className="flex items-center justify-between border-b border-neutral-200 dark:border-neutral-800 pb-3">
-              <h3 className="text-sm font-bold text-neutral-900 dark:text-neutral-100">
-                Create Audience Segment
-              </h3>
-              <button onClick={() => setShowModal(false)} className="text-neutral-400">✕</button>
-            </div>
-
-            <form onSubmit={handleSubmit} className="space-y-3 text-xs">
-              <div>
-                <label className="block text-neutral-500 font-medium mb-1">List Name</label>
-                <input
-                  type="text"
-                  required
-                  value={formData.name}
-                  onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                  className="w-full px-2.5 py-1.5 rounded border border-neutral-200 dark:border-neutral-700 bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100"
-                  placeholder="e.g. Hyderabad HORECA Distributors"
-                />
-              </div>
-
-              <div>
-                <label className="block text-neutral-500 font-medium mb-1">Description</label>
-                <input
-                  type="text"
-                  value={formData.description}
-                  onChange={(e) => setFormData({ ...formData, description: e.target.value })}
-                  className="w-full px-2.5 py-1.5 rounded border border-neutral-200 dark:border-neutral-700 bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100"
-                />
-              </div>
-
-              <div className="grid grid-cols-2 gap-2">
-                <div>
-                  <label className="block text-neutral-500 font-medium mb-1">Target City</label>
-                  <input
-                    type="text"
-                    value={formData.city}
-                    onChange={(e) => setFormData({ ...formData, city: e.target.value })}
-                    className="w-full px-2.5 py-1.5 rounded border border-neutral-200 dark:border-neutral-700 bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100"
-                  />
-                </div>
-                <div>
-                  <label className="block text-neutral-500 font-medium mb-1">Customer Segment</label>
-                  <select
-                    value={formData.leadStatus}
-                    onChange={(e) => setFormData({ ...formData, leadStatus: e.target.value })}
-                    className="w-full px-2.5 py-1.5 rounded border border-neutral-200 dark:border-neutral-700 bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100"
-                  >
-                    <option value="RETAILER">RETAILER</option>
-                    <option value="DISTRIBUTOR">DISTRIBUTOR</option>
-                    <option value="WHOLESALE">WHOLESALE</option>
-                    <option value="VIP">VIP</option>
-                  </select>
-                </div>
-              </div>
-
-              <div className="flex items-center justify-end gap-2 pt-3 border-t border-neutral-200 dark:border-neutral-800">
-                <button
-                  type="button"
-                  onClick={() => setShowModal(false)}
-                  className="px-3 py-1.5 rounded border border-neutral-200 dark:border-neutral-700 text-neutral-600 dark:text-neutral-300"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  className="px-4 py-1.5 rounded bg-neutral-900 dark:bg-white text-white dark:text-neutral-900 font-semibold"
-                >
-                  Create Segment
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
+      {/* Unified Create Segment Modal */}
+      <CreateSegmentModal
+        isOpen={showModal}
+        onClose={() => setShowModal(false)}
+        contacts={contacts}
+        existingLists={lists}
+        initialSegment="FAMILY"
+        initialName="YAR FAMILY CONTACTS"
+        onSave={async (data) => {
+          await onCreateList(data);
+          setShowModal(false);
+        }}
+      />
     </div>
   );
 };

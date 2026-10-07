@@ -9,19 +9,33 @@ import {
   ArrowRight, 
   RefreshCw, 
   HelpCircle,
-  FileText
+  FileText,
+  Users
 } from 'lucide-react';
 import { apiClient } from '../services/apiClient';
+import { Contact, ContactList } from '../types';
+import { CreateSegmentModal } from './CreateSegmentModal';
 
 interface ImportWizardViewProps {
   onImportComplete: () => void;
+  contacts?: Contact[];
+  lists?: ContactList[];
+  onCreateList?: (data: any) => Promise<void>;
 }
 
-export const ImportWizardView: React.FC<ImportWizardViewProps> = ({ onImportComplete }) => {
+export const ImportWizardView: React.FC<ImportWizardViewProps> = ({ 
+  onImportComplete,
+  contacts = [],
+  lists = [],
+  onCreateList
+}) => {
   const [step, setStep] = useState<'upload' | 'mapping' | 'preview' | 'committing' | 'success'>('upload');
   const [fileName, setFileName] = useState('');
   const [rawHeaders, setRawHeaders] = useState<string[]>([]);
   const [rawRows, setRawRows] = useState<any[]>([]);
+  const [targetListId, setTargetListId] = useState<string>('');
+  const [selectedLeadStatus, setSelectedLeadStatus] = useState<string>('LEAD');
+  const [showSegmentModal, setShowSegmentModal] = useState(false);
 
   // Mapping state
   const [columnMapping, setColumnMapping] = useState({
@@ -37,9 +51,11 @@ export const ImportWizardView: React.FC<ImportWizardViewProps> = ({ onImportComp
   // Data Quality Engine Report
   const [report, setReport] = useState<any>(null);
   const [sampleProcessed, setSampleProcessed] = useState<any[]>([]);
+  const [allProcessed, setAllProcessed] = useState<any[]>([]);
   const [duplicatePolicy, setDuplicatePolicy] = useState<'UPDATE_EXISTING' | 'SKIP' | 'KEEP_BOTH'>('UPDATE_EXISTING');
   const [loading, setLoading] = useState(false);
   const [commitResult, setCommitResult] = useState<any>(null);
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
   // Sample data button for instant testing
   const loadDemoRetailersData = () => {
@@ -104,15 +120,22 @@ Anand Mohan,Mohan Sweets,12345,invalid-email,Nizamabad,Retailer`;
 
   const handleRunValidation = async () => {
     setLoading(true);
+    setErrorMsg(null);
     try {
       const res = await apiClient.previewImport(rawRows, columnMapping);
-      if (res.data) {
-        setReport(res.data.report);
-        setSampleProcessed(res.data.sampleProcessed);
+      const data = (res && res.report) ? res : (res && res.data ? res.data : null);
+      if (data && data.report) {
+        setReport(data.report);
+        setSampleProcessed(data.sampleProcessed || []);
+        setAllProcessed(data.processedRows || data.sampleProcessed || []);
         setStep('preview');
+      } else {
+        console.error('Invalid preview response:', res);
+        setErrorMsg('Failed to generate preview report. Please verify your column mappings.');
       }
-    } catch (err) {
-      console.error(err);
+    } catch (err: any) {
+      console.error('Validation error:', err);
+      setErrorMsg(err?.message || 'Error validating data quality. Please try again.');
     } finally {
       setLoading(false);
     }
@@ -120,12 +143,23 @@ Anand Mohan,Mohan Sweets,12345,invalid-email,Nizamabad,Retailer`;
 
   const handleCommit = async () => {
     setStep('committing');
+    setErrorMsg(null);
     try {
-      const res = await apiClient.commitImport(sampleProcessed, duplicatePolicy, fileName);
-      setCommitResult(res.data);
+      const rowsToCommit = allProcessed.length > 0 ? allProcessed : sampleProcessed;
+      const res = await apiClient.commitImport(
+        rowsToCommit, 
+        duplicatePolicy, 
+        fileName,
+        selectedLeadStatus,
+        targetListId || undefined
+      );
+      const data = (res && typeof res.created !== 'undefined') ? res : (res && res.data ? res.data : res);
+      setCommitResult(data || { created: rowsToCommit.length, updated: 0, skipped: 0 });
       setStep('success');
-    } catch (err) {
-      console.error(err);
+    } catch (err: any) {
+      console.error('Commit error:', err);
+      setErrorMsg(err?.message || 'Failed to commit contacts to database.');
+      setStep('preview');
     }
   };
 
@@ -288,13 +322,21 @@ Anand Mohan,Mohan Sweets,12345,invalid-email,Nizamabad,Retailer`;
             </div>
           </div>
 
+          {errorMsg && (
+            <div className="p-3 rounded-lg bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-900/60 text-xs text-rose-700 dark:text-rose-400 flex items-center gap-2">
+              <AlertTriangle className="w-4 h-4 shrink-0" />
+              <span>{errorMsg}</span>
+            </div>
+          )}
+
           <div className="pt-4 flex justify-end">
             <button
               onClick={handleRunValidation}
               disabled={loading}
-              className="px-4 py-2 rounded-lg bg-neutral-900 dark:bg-white text-white dark:text-neutral-900 font-medium text-xs flex items-center gap-2 hover:bg-neutral-800 dark:hover:bg-neutral-100 transition shadow-sm"
+              className="px-4 py-2 rounded-lg bg-neutral-900 dark:bg-white text-white dark:text-neutral-900 font-medium text-xs flex items-center gap-2 hover:bg-neutral-800 dark:hover:bg-neutral-100 transition shadow-sm disabled:opacity-50 cursor-pointer"
             >
-              <span>Inspect & Validate Data Quality</span>
+              {loading && <RefreshCw className="w-3.5 h-3.5 animate-spin" />}
+              <span>{loading ? 'Inspecting Data Quality...' : 'Inspect & Validate Data Quality'}</span>
               <ArrowRight className="w-3.5 h-3.5" />
             </button>
           </div>
@@ -438,6 +480,75 @@ Anand Mohan,Mohan Sweets,12345,invalid-email,Nizamabad,Retailer`;
             </div>
           </div>
 
+          {/* Audience Segment & Category Mapping on Import */}
+          <div className="p-4 rounded-xl border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 space-y-3">
+            <div>
+              <h4 className="font-bold text-neutral-900 dark:text-neutral-100 flex items-center gap-1.5">
+                <Users className="w-4 h-4 text-primary-600" />
+                <span>Audience Segment & Category Mapping (Optional)</span>
+              </h4>
+              <p className="text-[11px] text-neutral-500 mt-0.5">
+                Tag all verified imported contacts and map them directly into a target audience segment in database.
+              </p>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3 pt-1">
+              <div>
+                <label className="block text-neutral-600 dark:text-neutral-300 font-semibold text-xs mb-1">
+                  Customer Segment (Category)
+                </label>
+                <select
+                  value={selectedLeadStatus}
+                  onChange={(e) => setSelectedLeadStatus(e.target.value)}
+                  className="w-full px-3 py-2 rounded-lg border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 font-medium text-xs focus:outline-none"
+                >
+                  <option value="LEAD">LEAD (General Leads)</option>
+                  <option value="FAMILY">FAMILY & RELATIVES</option>
+                  <option value="LOCAL">LOCAL CONTACTS</option>
+                  <option value="VIP">VIP (High Priority)</option>
+                  <option value="RETAILER">RETAILER</option>
+                  <option value="DISTRIBUTOR">DISTRIBUTOR</option>
+                  <option value="WHOLESALE">WHOLESALE</option>
+                  <option value="CUSTOMER">CUSTOMER</option>
+                </select>
+              </div>
+
+              <div>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="text-neutral-600 dark:text-neutral-300 font-semibold text-xs">
+                    Target Audience List
+                  </label>
+                  <button
+                    type="button"
+                    onClick={() => setShowSegmentModal(true)}
+                    className="text-[11px] text-primary-600 dark:text-primary-400 font-semibold hover:underline"
+                  >
+                    + Create New Segment
+                  </button>
+                </div>
+                <select
+                  value={targetListId}
+                  onChange={(e) => {
+                    if (e.target.value === '__CREATE_NEW__') {
+                      setShowSegmentModal(true);
+                    } else {
+                      setTargetListId(e.target.value);
+                    }
+                  }}
+                  className="w-full px-3 py-2 rounded-lg border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 font-medium text-xs focus:outline-none"
+                >
+                  <option value="">-- None (Do not assign to list) --</option>
+                  {lists.map(l => (
+                    <option key={l.id} value={l.id}>{l.name} ({l.contactIds.length} members)</option>
+                  ))}
+                  <option value="__CREATE_NEW__" className="font-bold text-primary-600">
+                    + Create New Segment...
+                  </option>
+                </select>
+              </div>
+            </div>
+          </div>
+
           {/* Action Row */}
           <div className="flex items-center justify-between pt-2">
             <button
@@ -457,6 +568,22 @@ Anand Mohan,Mohan Sweets,12345,invalid-email,Nizamabad,Retailer`;
           </div>
         </div>
       )}
+
+      {/* Unified Create Segment Modal */}
+      <CreateSegmentModal
+        isOpen={showSegmentModal}
+        onClose={() => setShowSegmentModal(false)}
+        contacts={contacts}
+        existingLists={lists}
+        initialSegment={selectedLeadStatus}
+        initialName=""
+        onSave={async (data) => {
+          if (onCreateList) {
+            await onCreateList(data);
+          }
+          setShowSegmentModal(false);
+        }}
+      />
 
       {/* STEP 4: Success confirmation */}
       {step === 'success' && (

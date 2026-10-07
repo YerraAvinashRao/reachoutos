@@ -48,6 +48,7 @@ export interface CommunicationPreference {
 export interface TimelineEvent {
   id: string;
   contactId: string;
+  tenantId?: string;
   eventType: 
     | 'CONTACT_CREATED' 
     | 'CONTACT_IMPORTED' 
@@ -62,6 +63,8 @@ export interface TimelineEvent {
     | 'NOTE_ADDED' 
     | 'TAG_ADDED';
   actor: string;
+  actorId?: string;
+  actorName?: string;
   description: string;
   campaignName?: string;
   metadata?: Record<string, any>;
@@ -151,6 +154,7 @@ export type RecipientStatus =
 
 export interface CampaignRecipient {
   id: string;
+  tenantId?: string;
   campaignId: string;
   contactId: string;
   contactName: string;
@@ -178,9 +182,9 @@ export interface Campaign {
   description: string;
   channel: ChannelType;
   status: CampaignStatus;
-  targetListId: string;
+  targetListId?: string;
   targetListName: string;
-  templateId: string;
+  templateId?: string;
   templateVersion: number;
   templateSnapshot: {
     name: string;

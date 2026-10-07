@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { createPortal } from 'react-dom';
 import { 
   ArrowLeft, 
   Send, 
@@ -13,7 +14,8 @@ import {
   Sparkles,
   UserCheck,
   Check,
-  X
+  X,
+  Trash2
 } from 'lucide-react';
 import { Campaign, CampaignRecipient, Role, Contact } from '../types';
 
@@ -25,6 +27,8 @@ interface CampaignDetailViewProps {
   onUpdateStatus: (newStatus: string) => void;
   onEnterSendingWorkspace: () => void;
   onSendTest: (phone: string, name: string) => Promise<any>;
+  onSyncTemplate?: () => Promise<any>;
+  onDeleteCampaign?: (id: string) => Promise<void>;
   userRole: Role;
 }
 
@@ -36,10 +40,17 @@ export const CampaignDetailView: React.FC<CampaignDetailViewProps> = ({
   onUpdateStatus,
   onEnterSendingWorkspace,
   onSendTest,
+  onSyncTemplate,
+  onDeleteCampaign,
   userRole
 }) => {
   const [activeTab, setActiveTab] = useState<'overview' | 'preview5' | 'snapshot' | 'recipients'>('overview');
   const [showTestModal, setShowTestModal] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
+  const [isSyncingTemplate, setIsSyncingTemplate] = useState(false);
+  const [syncMessage, setSyncMessage] = useState<string | null>(null);
+  const [queuePage, setQueuePage] = useState(1);
+  const queuePageSize = 50;
   const [testPhone, setTestPhone] = useState('+919848099999');
   const [testName, setTestName] = useState('Internal Test Recipient');
   const [testResult, setTestResult] = useState<any>(null);
@@ -160,6 +171,27 @@ export const CampaignDetailView: React.FC<CampaignDetailViewProps> = ({
               Resume
             </button>
           )}
+
+          {userRole !== 'VIEWER' && onDeleteCampaign && (
+            <button
+              onClick={async () => {
+                if (window.confirm(`Are you sure you want to delete campaign "${campaign.name}"? This action will permanently remove all recipients and campaign metrics.`)) {
+                  setIsDeleting(true);
+                  try {
+                    await onDeleteCampaign(campaign.id);
+                    onBack();
+                  } finally {
+                    setIsDeleting(false);
+                  }
+                }
+              }}
+              disabled={isDeleting}
+              className="p-1.5 rounded border border-neutral-300 dark:border-neutral-700 text-neutral-400 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/40 transition disabled:opacity-50"
+              title="Delete Campaign"
+            >
+              <Trash2 className="w-3.5 h-3.5" />
+            </button>
+          )}
         </div>
       </div>
 
@@ -176,6 +208,31 @@ export const CampaignDetailView: React.FC<CampaignDetailViewProps> = ({
           </div>
 
           <div className="flex items-center gap-2">
+            {userRole !== 'VIEWER' && onSyncTemplate && (
+              <button
+                onClick={async () => {
+                  setIsSyncingTemplate(true);
+                  setSyncMessage(null);
+                  try {
+                    const res = await onSyncTemplate();
+                    const count = res?.updatedCount ?? 0;
+                    setSyncMessage(`✓ Synced template! Updated ${count} pending message${count === 1 ? '' : 's'}.`);
+                    setTimeout(() => setSyncMessage(null), 4000);
+                  } catch (err: any) {
+                    alert(err?.message || 'Failed to sync template.');
+                  } finally {
+                    setIsSyncingTemplate(false);
+                  }
+                }}
+                disabled={isSyncingTemplate}
+                className="px-3 py-1.5 rounded border border-blue-200 dark:border-blue-800 bg-blue-50 dark:bg-blue-950/30 text-xs font-semibold text-blue-700 dark:text-blue-300 hover:bg-blue-100 dark:hover:bg-blue-900/40 flex items-center gap-1.5 transition disabled:opacity-50 cursor-pointer"
+                title="Sync existing campaign with the latest edits from the linked template"
+              >
+                <Sparkles className="w-3.5 h-3.5 text-blue-500" />
+                <span>{isSyncingTemplate ? 'Syncing...' : 'Sync with Latest Template'}</span>
+              </button>
+            )}
+
             <button
               onClick={() => setShowTestModal(true)}
               className="px-3 py-1.5 rounded border border-neutral-200 dark:border-neutral-700 bg-neutral-50 dark:bg-neutral-800 text-xs font-medium text-neutral-700 dark:text-neutral-300 hover:bg-neutral-100 dark:hover:bg-neutral-700 flex items-center gap-1.5 transition"
@@ -186,10 +243,16 @@ export const CampaignDetailView: React.FC<CampaignDetailViewProps> = ({
           </div>
         </div>
 
+        {syncMessage && (
+          <div className="p-2.5 rounded-lg bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-800 text-emerald-800 dark:text-emerald-300 text-xs font-semibold">
+            {syncMessage}
+          </div>
+        )}
+
         {/* Progress bar */}
         <div className="space-y-1.5 pt-1">
           <div className="flex justify-between text-xs text-neutral-500 font-mono">
-            <span>Progress: {sent} / {total} Dispatched</span>
+            <span>Progress: {sent} / {total} Confirmed Sent</span>
             <span>{Math.round((sent / (total || 1)) * 100)}% Complete</span>
           </div>
           <div className="w-full bg-neutral-100 dark:bg-neutral-800 h-2 rounded-full overflow-hidden">
@@ -209,12 +272,12 @@ export const CampaignDetailView: React.FC<CampaignDetailViewProps> = ({
         </div>
 
         <div className="p-3 rounded-lg border border-emerald-200 dark:border-emerald-900/60 bg-emerald-50/30 dark:bg-emerald-950/20 space-y-0.5">
-          <div className="text-emerald-700 dark:text-emerald-400 text-[11px]">User Confirmed Sent</div>
+          <div className="text-emerald-700 dark:text-emerald-400 text-[11px] font-semibold">Confirmed Sent</div>
           <div className="text-base font-bold font-mono text-emerald-700 dark:text-emerald-400">{sent}</div>
         </div>
 
         <div className="p-3 rounded-lg border border-blue-200 dark:border-blue-900/60 bg-blue-50/30 dark:bg-blue-950/20 space-y-0.5">
-          <div className="text-blue-700 dark:text-blue-400 text-[11px]">Opened in Composer</div>
+          <div className="text-blue-700 dark:text-blue-400 text-[11px] font-semibold">Opened (Pending Send)</div>
           <div className="text-base font-bold font-mono text-blue-700 dark:text-blue-400">{opened}</div>
         </div>
 
@@ -270,47 +333,89 @@ export const CampaignDetailView: React.FC<CampaignDetailViewProps> = ({
 
       {/* Tab: Overview / Queue */}
       {activeTab === 'overview' && (
-        <div className="rounded-lg border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 overflow-hidden text-xs">
-          <table className="w-full text-left">
-            <thead className="bg-neutral-50 dark:bg-neutral-800 text-neutral-500 text-[11px]">
-              <tr>
-                <th className="p-2.5">Recipient</th>
-                <th className="p-2.5">Company</th>
-                <th className="p-2.5">Channel Address</th>
-                <th className="p-2.5">Dispatched Status</th>
-                <th className="p-2.5">Operator</th>
-                <th className="p-2.5">Timestamps</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-neutral-100 dark:divide-neutral-800">
-              {recipients.map(r => (
-                <tr key={r.id} className="hover:bg-neutral-50/50 dark:hover:bg-neutral-800/40">
-                  <td className="p-2.5 font-semibold text-neutral-900 dark:text-neutral-100">{r.contactName}</td>
-                  <td className="p-2.5 text-neutral-500">{r.companyName}</td>
-                  <td className="p-2.5 font-mono text-[11px] text-neutral-700 dark:text-neutral-300">{r.channelAddress}</td>
-                  <td className="p-2.5">
-                    <span className={`px-2 py-0.5 rounded text-[10px] font-mono font-medium ${
-                      r.status === 'USER_SENT'
-                        ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-400'
-                        : r.status === 'OPENED'
-                        ? 'bg-blue-100 text-blue-800 dark:bg-blue-950 dark:text-blue-400'
-                        : r.status === 'SKIPPED'
-                        ? 'bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-400'
-                        : r.status === 'BLOCKED' || r.status === 'OPTED_OUT'
-                        ? 'bg-rose-100 text-rose-800 dark:bg-rose-950 dark:text-rose-400'
-                        : 'bg-neutral-100 text-neutral-600 dark:bg-neutral-800 dark:text-neutral-400'
-                    }`}>
-                      {r.status}
-                    </span>
-                  </td>
-                  <td className="p-2.5 text-neutral-400 text-[11px]">{r.claimedByOperator || '—'}</td>
-                  <td className="p-2.5 text-neutral-400 text-[11px] font-mono">
-                    {r.userSentAt ? `Sent: ${new Date(r.userSentAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}` : r.openedAt ? `Opened: ${new Date(r.openedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}` : '—'}
-                  </td>
+        <div className="space-y-2">
+          <div className="rounded-lg border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 overflow-x-auto text-xs">
+            <table className="w-full min-w-[640px] text-left">
+              <thead className="bg-neutral-50 dark:bg-neutral-800 text-neutral-500 text-[11px]">
+                <tr>
+                  <th className="p-2.5">Recipient</th>
+                  <th className="p-2.5">Company</th>
+                  <th className="p-2.5">Channel Address</th>
+                  <th className="p-2.5">Outreach Status</th>
+                  <th className="p-2.5">Operator</th>
+                  <th className="p-2.5">Timestamps</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody className="divide-y divide-neutral-100 dark:divide-neutral-800">
+                {recipients.length === 0 ? (
+                  <tr>
+                    <td colSpan={6} className="p-4 text-center text-neutral-400">
+                      No recipients in queue.
+                    </td>
+                  </tr>
+                ) : (
+                  recipients.slice((queuePage - 1) * queuePageSize, queuePage * queuePageSize).map(r => (
+                    <tr key={r.id} className="hover:bg-neutral-50/50 dark:hover:bg-neutral-800/40">
+                      <td className="p-2.5 font-semibold text-neutral-900 dark:text-neutral-100">{r.contactName}</td>
+                      <td className="p-2.5 text-neutral-500">{r.companyName}</td>
+                      <td className="p-2.5 font-mono text-[11px] text-neutral-700 dark:text-neutral-300">{r.channelAddress}</td>
+                      <td className="p-2.5">
+                        <span className={`px-2 py-0.5 rounded text-[10px] font-mono font-medium ${
+                          r.status === 'USER_SENT'
+                            ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-400 font-bold'
+                            : r.status === 'OPENED'
+                            ? 'bg-blue-100 text-blue-800 dark:bg-blue-950 dark:text-blue-300 font-semibold'
+                            : r.status === 'SKIPPED'
+                            ? 'bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-400'
+                            : r.status === 'BLOCKED' || r.status === 'OPTED_OUT'
+                            ? 'bg-rose-100 text-rose-800 dark:bg-rose-950 dark:text-rose-400'
+                            : 'bg-neutral-100 text-neutral-600 dark:bg-neutral-800 dark:text-neutral-400'
+                        }`}>
+                          {r.status === 'USER_SENT'
+                            ? 'CONFIRMED SENT'
+                            : r.status === 'OPENED'
+                            ? 'OPENED (PENDING SEND)'
+                            : r.status}
+                        </span>
+                      </td>
+                      <td className="p-2.5 text-neutral-400 text-[11px]">{r.claimedByOperator || '—'}</td>
+                      <td className="p-2.5 text-neutral-400 text-[11px] font-mono">
+                        {r.userSentAt ? `Sent: ${new Date(r.userSentAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}` : r.openedAt ? `Opened: ${new Date(r.openedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}` : '—'}
+                      </td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
+
+          {/* Queue Pagination Footer */}
+          {recipients.length > queuePageSize && (
+            <div className="flex items-center justify-between p-2.5 rounded-lg border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 text-xs">
+              <span className="text-neutral-500 font-mono text-[11px]">
+                Showing {(queuePage - 1) * queuePageSize + 1}–{Math.min(queuePage * queuePageSize, recipients.length)} of {recipients.length} recipients
+              </span>
+              <div className="flex items-center gap-1.5">
+                <button
+                  onClick={() => setQueuePage(prev => Math.max(1, prev - 1))}
+                  disabled={queuePage <= 1}
+                  className="px-2.5 py-1 rounded border border-neutral-200 dark:border-neutral-700 bg-neutral-50 dark:bg-neutral-800 text-xs disabled:opacity-40 cursor-pointer"
+                >
+                  ← Prev
+                </button>
+                <span className="px-2 font-mono text-xs font-semibold">
+                  Page {queuePage} of {Math.ceil(recipients.length / queuePageSize)}
+                </span>
+                <button
+                  onClick={() => setQueuePage(prev => Math.min(Math.ceil(recipients.length / queuePageSize), prev + 1))}
+                  disabled={queuePage >= Math.ceil(recipients.length / queuePageSize)}
+                  className="px-2.5 py-1 rounded border border-neutral-200 dark:border-neutral-700 bg-neutral-50 dark:bg-neutral-800 text-xs disabled:opacity-40 cursor-pointer"
+                >
+                  Next →
+                </button>
+              </div>
+            </div>
+          )}
         </div>
       )}
 
@@ -376,9 +481,9 @@ export const CampaignDetailView: React.FC<CampaignDetailViewProps> = ({
       )}
 
       {/* Test Recipient Modal */}
-      {showTestModal && (
-        <div className="fixed inset-0 bg-neutral-950/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="w-full max-w-md bg-white dark:bg-neutral-900 rounded-xl border border-neutral-200 dark:border-neutral-800 shadow-2xl p-5 space-y-4">
+      {showTestModal && createPortal(
+        <div className="fixed inset-0 bg-neutral-950/60 backdrop-blur-sm z-[99999] flex items-center justify-center p-4">
+          <div className="w-full max-w-md bg-white dark:bg-neutral-900 rounded-xl border border-neutral-200 dark:border-neutral-800 shadow-2xl p-5 space-y-4 my-auto">
             <div className="flex items-center justify-between border-b border-neutral-200 dark:border-neutral-800 pb-3">
               <h3 className="text-sm font-bold text-neutral-900 dark:text-neutral-100 flex items-center gap-1.5">
                 <FlaskConical className="w-4 h-4 text-purple-500" />
@@ -448,7 +553,8 @@ export const CampaignDetailView: React.FC<CampaignDetailViewProps> = ({
               </div>
             </form>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
     </div>
   );

@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { 
   Users, 
   Send, 
@@ -8,32 +8,54 @@ import {
   Sparkles, 
   ShieldAlert,
   Flame,
-  FileText
+  FileText,
+  BookOpen,
+  X
 } from 'lucide-react';
-import { Campaign } from '../types';
+import { Campaign, User } from '../types';
 
 interface DashboardViewProps {
   stats: any;
   campaigns: Campaign[];
   onOpenCampaign: (campaignId: string) => void;
   onNavigate: (tab: any) => void;
+  user?: User | null;
+  onOpenGuide?: () => void;
+  tourCompleted?: boolean;
+  onDismissTourBanner?: () => void;
 }
 
 export const DashboardView: React.FC<DashboardViewProps> = ({
   stats,
   campaigns,
   onOpenCampaign,
-  onNavigate
+  onNavigate,
+  user,
+  onOpenGuide,
+  tourCompleted,
+  onDismissTourBanner
 }) => {
+  const [isDismissed, setIsDismissed] = useState<boolean>(() => {
+    try {
+      return typeof window !== 'undefined' && localStorage.getItem('reachout_tour_dismissed') === 'true';
+    } catch {
+      return false;
+    }
+  });
+
   const activeCampaign = campaigns.find(c => c.status === 'ACTIVE');
 
   return (
     <div className="space-y-6">
       {/* Top Banner / Welcome */}
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 p-4 rounded-xl border border-neutral-200 dark:border-neutral-800 bg-gradient-to-r from-neutral-50 to-white dark:from-neutral-900 dark:to-neutral-900/40">
+      <div 
+        data-tour="dashboard.welcome"
+        className="flex flex-col md:flex-row md:items-center justify-between gap-4 p-4 rounded-xl border border-neutral-200 dark:border-neutral-800 bg-gradient-to-r from-neutral-50 to-white dark:from-neutral-900 dark:to-neutral-900/40"
+      >
         <div>
           <h1 className="text-lg font-bold text-neutral-900 dark:text-neutral-100 flex items-center gap-2">
-            ReachOut OS Command Center
+            <span>Welcome back, {user?.name || 'Operator'}</span>
+            <span className="text-sm font-normal text-neutral-400">👋</span>
           </h1>
           <p className="text-xs text-neutral-500 dark:text-neutral-400 mt-0.5">
             Human-in-the-Loop Multi-Channel Dispatch • Verified Consent & Data Quality Engine
@@ -55,6 +77,88 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
           </button>
         </div>
       </div>
+
+      {/* Interactive Quick Start & Guide Banner (Hidden once tour is completed or dismissed) */}
+      {!isDismissed && !tourCompleted && (
+        <div className="p-4 rounded-xl border border-emerald-200 dark:border-emerald-800/80 bg-gradient-to-r from-emerald-50/80 via-white to-emerald-50/40 dark:from-emerald-950/30 dark:via-neutral-900 dark:to-neutral-900 shadow-xs space-y-3 relative">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-xl bg-emerald-600 text-white flex items-center justify-center shrink-0 shadow-xs">
+                <BookOpen className="w-5 h-5" />
+              </div>
+              <div>
+                <h2 className="text-sm font-bold text-neutral-900 dark:text-neutral-100 flex items-center gap-2">
+                  <span>New to ReachOut OS? Quick-Start Guided Tour</span>
+                  <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-200 dark:bg-emerald-900 text-emerald-800 dark:text-emerald-300 font-bold uppercase">Guide</span>
+                </h2>
+                <p className="text-xs text-neutral-600 dark:text-neutral-400">
+                  Follow our 4-step workflow: Import Contacts ➔ Craft Template ➔ Launch Campaign ➔ Safe 1-Click Dispatch.
+                </p>
+              </div>
+            </div>
+            <div className="flex items-center gap-2 shrink-0">
+              {onOpenGuide && (
+                <button
+                  onClick={onOpenGuide}
+                  className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-semibold text-xs rounded-lg shadow-sm transition flex items-center gap-2 cursor-pointer"
+                >
+                  <span>Launch Interactive Walkthrough</span>
+                  <ArrowRight className="w-3.5 h-3.5" />
+                </button>
+              )}
+              <button
+                onClick={() => {
+                  try {
+                    localStorage.setItem('reachout_tour_dismissed', 'true');
+                  } catch {}
+                  setIsDismissed(true);
+                  onDismissTourBanner?.();
+                }}
+                className="p-1.5 text-neutral-400 hover:text-neutral-700 dark:hover:text-neutral-200 rounded-lg hover:bg-neutral-100 dark:hover:bg-neutral-800 transition cursor-pointer"
+                title="Dismiss quick-start guide banner"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+          </div>
+
+          {/* 4 Quick Step Cards */}
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-2 pt-1 text-xs">
+            <button
+              onClick={() => onNavigate('contacts')}
+              className="p-2.5 rounded-lg border border-neutral-200 dark:border-neutral-800 bg-white/80 dark:bg-neutral-800/60 hover:border-emerald-300 dark:hover:border-emerald-700 text-left transition cursor-pointer group"
+            >
+              <div className="text-[10px] font-bold text-emerald-600 dark:text-emerald-400">STEP 1</div>
+              <div className="font-semibold text-neutral-900 dark:text-neutral-100 group-hover:text-emerald-600 dark:group-hover:text-emerald-400">Add or Import Contacts</div>
+              <div className="text-[10px] text-neutral-500 mt-0.5">E.164 phone validation</div>
+            </button>
+            <button
+              onClick={() => onNavigate('templates')}
+              className="p-2.5 rounded-lg border border-neutral-200 dark:border-neutral-800 bg-white/80 dark:bg-neutral-800/60 hover:border-emerald-300 dark:hover:border-emerald-700 text-left transition cursor-pointer group"
+            >
+              <div className="text-[10px] font-bold text-emerald-600 dark:text-emerald-400">STEP 2</div>
+              <div className="font-semibold text-neutral-900 dark:text-neutral-100 group-hover:text-emerald-600 dark:group-hover:text-emerald-400">Create Message Template</div>
+              <div className="text-[10px] text-neutral-500 mt-0.5">WhatsApp & Email tags</div>
+            </button>
+            <button
+              onClick={() => onNavigate('campaigns')}
+              className="p-2.5 rounded-lg border border-neutral-200 dark:border-neutral-800 bg-white/80 dark:bg-neutral-800/60 hover:border-emerald-300 dark:hover:border-emerald-700 text-left transition cursor-pointer group"
+            >
+              <div className="text-[10px] font-bold text-emerald-600 dark:text-emerald-400">STEP 3</div>
+              <div className="font-semibold text-neutral-900 dark:text-neutral-100 group-hover:text-emerald-600 dark:group-hover:text-emerald-400">Activate Campaign</div>
+              <div className="text-[10px] text-neutral-500 mt-0.5">Automated queue validation</div>
+            </button>
+            <button
+              onClick={() => onNavigate('campaigns')}
+              className="p-2.5 rounded-lg border border-neutral-200 dark:border-neutral-800 bg-white/80 dark:bg-neutral-800/60 hover:border-emerald-300 dark:hover:border-emerald-700 text-left transition cursor-pointer group"
+            >
+              <div className="text-[10px] font-bold text-emerald-600 dark:text-emerald-400">STEP 4</div>
+              <div className="font-semibold text-neutral-900 dark:text-neutral-100 group-hover:text-emerald-600 dark:group-hover:text-emerald-400">Sending Workspace</div>
+              <div className="text-[10px] text-neutral-500 mt-0.5">Safe 1-click dispatch</div>
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Metrics Row */}
       <div className="grid grid-cols-2 md:grid-cols-5 gap-3">

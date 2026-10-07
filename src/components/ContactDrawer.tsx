@@ -11,7 +11,8 @@ import {
   Send, 
   Plus, 
   Calendar,
-  AlertCircle
+  AlertCircle,
+  Trash2
 } from 'lucide-react';
 import { Contact, TimelineEvent } from '../types';
 
@@ -22,6 +23,7 @@ interface ContactDrawerProps {
   onToggleBlock: (contactId: string, reason?: string) => void;
   onAddNote: (contactId: string, note: string) => void;
   onUpdatePreferences: (contactId: string, channel: 'WHATSAPP' | 'EMAIL', allowed: boolean) => void;
+  onDeleteContact?: (contactId: string) => void | Promise<void>;
 }
 
 export const ContactDrawer: React.FC<ContactDrawerProps> = ({
@@ -30,7 +32,8 @@ export const ContactDrawer: React.FC<ContactDrawerProps> = ({
   onClose,
   onToggleBlock,
   onAddNote,
-  onUpdatePreferences
+  onUpdatePreferences,
+  onDeleteContact
 }) => {
   const [newNote, setNewNote] = useState('');
   const [activeTab, setActiveTab] = useState<'profile' | 'timeline' | 'preferences'>('profile');
@@ -70,12 +73,30 @@ export const ContactDrawer: React.FC<ContactDrawerProps> = ({
           </p>
         </div>
 
-        <button
-          onClick={onClose}
-          className="p-1.5 text-neutral-400 hover:text-neutral-700 dark:hover:text-neutral-200 rounded-md hover:bg-neutral-100 dark:hover:bg-neutral-800 transition"
-        >
-          <X className="w-5 h-5" />
-        </button>
+        <div className="flex items-center gap-1.5">
+          {onDeleteContact && (
+            <button
+              onClick={async () => {
+                if (window.confirm(`Are you sure you want to permanently delete contact "${contact.displayName}"? This will permanently remove all associated data.`)) {
+                  await onDeleteContact(contact.id);
+                  onClose();
+                }
+              }}
+              className="flex items-center gap-1 text-xs text-rose-600 dark:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/40 px-2.5 py-1.5 rounded-md transition font-medium cursor-pointer"
+              title="Delete Contact"
+            >
+              <Trash2 className="w-3.5 h-3.5" />
+              <span>Delete</span>
+            </button>
+          )}
+
+          <button
+            onClick={onClose}
+            className="p-1.5 text-neutral-400 hover:text-neutral-700 dark:hover:text-neutral-200 rounded-md hover:bg-neutral-100 dark:hover:bg-neutral-800 transition cursor-pointer"
+          >
+            <X className="w-5 h-5" />
+          </button>
+        </div>
       </div>
 
       {/* Tabs */}

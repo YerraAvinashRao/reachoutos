@@ -42,25 +42,35 @@ export class DataQualityEngine {
       return { isValid: false, canonical: '', country: defaultCountry, isMobile: false, isLandline: false, error: 'Phone number is empty' };
     }
 
+    // Handle multi-value fields (e.g., Google Contacts "num1 ::: num2" or "num1, num2" or "num1 / num2")
+    const segments = rawPhone.split(/[:;,/|]+/).map(s => s.trim()).filter(Boolean);
+    const candidate = segments[0] || rawPhone;
+
     // Strip all whitespace, dashes, parentheses, dots
-    const cleaned = rawPhone.trim().replace(/[\s\-\(\)\.]/g, '');
+    let cleaned = candidate.trim().replace(/[\s\-\(\)\.]/g, '');
+
+    // Convert 00 to + (e.g., 00919848012345 -> +919848012345)
+    if (cleaned.startsWith('00')) {
+      cleaned = '+' + cleaned.substring(2);
+    }
 
     // India specific rule
-    if (defaultCountry === 'IN' || cleaned.startsWith('+91') || (cleaned.startsWith('91') && cleaned.length === 12) || (cleaned.startsWith('0') && cleaned.length === 11)) {
+    if (defaultCountry === 'IN' || cleaned.startsWith('+91') || (cleaned.startsWith('91') && cleaned.length === 12) || (cleaned.startsWith('0') && cleaned.length >= 10)) {
       let digits = cleaned;
       if (digits.startsWith('+91')) {
         digits = digits.substring(3);
       } else if (digits.startsWith('91') && digits.length === 12) {
         digits = digits.substring(2);
-      } else if (digits.startsWith('0') && digits.length === 11) {
-        digits = digits.substring(1);
+      } else if (digits.startsWith('0')) {
+        digits = digits.replace(/^0+/, '');
       }
 
       // Check if 10 digits
       if (!/^\d{10}$/.test(digits)) {
+        const canonical = cleaned.startsWith('+') ? cleaned : `+91${digits}`;
         return {
           isValid: false,
-          canonical: cleaned,
+          canonical,
           country: 'IN',
           isMobile: false,
           isLandline: digits.length < 10,
@@ -70,30 +80,23 @@ export class DataQualityEngine {
 
       // Indian mobile numbers start with 6, 7, 8, or 9
       const firstDigit = digits.charAt(0);
-      if (['6', '7', '8', '9'].includes(firstDigit)) {
-        return {
-          isValid: true,
-          canonical: `+91${digits}`,
-          country: 'IN',
-          isMobile: true,
-          isLandline: false
-        };
-      } else {
-        return {
-          isValid: false,
-          canonical: `+91${digits}`,
-          country: 'IN',
-          isMobile: false,
-          isLandline: true,
-          error: `Number begins with '${firstDigit}' which indicates a landline, not a mobile/WhatsApp line.`
-        };
-      }
+      const isMobile = ['6', '7', '8', '9'].includes(firstDigit);
+      const canonical = `+91${digits}`;
+
+      return {
+        isValid: isMobile,
+        canonical,
+        country: 'IN',
+        isMobile,
+        isLandline: !isMobile,
+        error: isMobile ? undefined : `Number begins with '${firstDigit}' which indicates a landline, not a mobile/WhatsApp line.`
+      };
     }
 
     // Generic international E.164 check
     if (cleaned.startsWith('+')) {
       const digitsOnly = cleaned.substring(1);
-      if (/^\d{7,15}$/.test(digitsOnly)) {
+      if (/^[1-9]\d{7,14}$/.test(digitsOnly)) {
         return {
           isValid: true,
           canonical: cleaned,
@@ -105,7 +108,7 @@ export class DataQualityEngine {
     }
 
     // If digits only without plus
-    if (/^\d{10,14}$/.test(cleaned)) {
+    if (/^[1-9]\d{9,14}$/.test(cleaned)) {
       return {
         isValid: true,
         canonical: `+${cleaned}`,
@@ -117,7 +120,7 @@ export class DataQualityEngine {
 
     return {
       isValid: false,
-      canonical: cleaned,
+      canonical: cleaned.startsWith('+') ? cleaned : `+${cleaned}`,
       country: defaultCountry,
       isMobile: false,
       isLandline: false,

@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
-import { Send, Plus, CheckCircle2, Clock, Play, Pause, AlertCircle, Eye, ArrowRight } from 'lucide-react';
+import { createPortal } from 'react-dom';
+import { Send, Plus, CheckCircle2, Clock, Play, Pause, AlertCircle, Eye, ArrowRight, Trash2, Loader2 } from 'lucide-react';
 import { Campaign, ContactList, MessageTemplate, Role, ChannelType } from '../types';
 
 interface CampaignsViewProps {
@@ -8,6 +9,7 @@ interface CampaignsViewProps {
   templates: MessageTemplate[];
   onSelectCampaign: (id: string) => void;
   onCreateCampaign: (data: any) => void;
+  onDeleteCampaign?: (id: string) => Promise<void>;
   userRole: Role;
 }
 
@@ -17,9 +19,11 @@ export const CampaignsView: React.FC<CampaignsViewProps> = ({
   templates,
   onSelectCampaign,
   onCreateCampaign,
+  onDeleteCampaign,
   userRole
 }) => {
   const [showCreateModal, setShowCreateModal] = useState(false);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
   const [formData, setFormData] = useState<{
     name: string;
     description: string;
@@ -116,7 +120,7 @@ export const CampaignsView: React.FC<CampaignsViewProps> = ({
               <div className="flex items-center gap-5">
                 <div className="w-36 space-y-1 text-right">
                   <div className="flex items-center justify-between text-xs">
-                    <span className="text-neutral-400 text-[11px]">Dispatched</span>
+                    <span className="text-neutral-400 text-[11px]">Confirmed Sent</span>
                     <span className="font-mono font-bold text-neutral-800 dark:text-neutral-200">
                       {c.sentCount} / {c.recipientsCount}
                     </span>
@@ -133,6 +137,31 @@ export const CampaignsView: React.FC<CampaignsViewProps> = ({
                   <span>Inspect</span>
                   <ArrowRight className="w-3.5 h-3.5" />
                 </button>
+
+                {userRole !== 'VIEWER' && onDeleteCampaign && (
+                  <button
+                    onClick={async (e) => {
+                      e.stopPropagation();
+                      if (window.confirm(`Are you sure you want to delete campaign "${c.name}"? This action will permanently remove all recipients and campaign metrics.`)) {
+                        setDeletingId(c.id);
+                        try {
+                          await onDeleteCampaign(c.id);
+                        } finally {
+                          setDeletingId(null);
+                        }
+                      }
+                    }}
+                    disabled={deletingId === c.id}
+                    className="p-1.5 rounded-md text-neutral-400 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/40 transition disabled:opacity-50 cursor-pointer"
+                    title="Delete Campaign"
+                  >
+                    {deletingId === c.id ? (
+                      <Loader2 className="w-3.5 h-3.5 animate-spin text-rose-500" />
+                    ) : (
+                      <Trash2 className="w-3.5 h-3.5" />
+                    )}
+                  </button>
+                )}
               </div>
             </div>
           );
@@ -140,9 +169,9 @@ export const CampaignsView: React.FC<CampaignsViewProps> = ({
       </div>
 
       {/* Modal: Create Campaign */}
-      {showCreateModal && (
-        <div className="fixed inset-0 bg-neutral-950/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="w-full max-w-lg bg-white dark:bg-neutral-900 rounded-xl border border-neutral-200 dark:border-neutral-800 shadow-2xl p-5 space-y-4">
+      {showCreateModal && createPortal(
+        <div className="fixed inset-0 bg-neutral-950/60 backdrop-blur-sm z-[99999] flex items-center justify-center p-4">
+          <div className="w-full max-w-lg bg-white dark:bg-neutral-900 rounded-xl border border-neutral-200 dark:border-neutral-800 shadow-2xl p-5 space-y-4 my-auto">
             <div className="flex items-center justify-between border-b border-neutral-200 dark:border-neutral-800 pb-3">
               <div>
                 <h3 className="text-sm font-bold text-neutral-900 dark:text-neutral-100">
@@ -248,7 +277,8 @@ export const CampaignsView: React.FC<CampaignsViewProps> = ({
               </div>
             </form>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
     </div>
   );

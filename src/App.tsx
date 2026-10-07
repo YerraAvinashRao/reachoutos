@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { Navbar } from './components/Navbar';
 import { Sidebar, NavTab } from './components/Sidebar';
+import { MobileBottomNav } from './components/MobileBottomNav';
 import { DashboardView } from './components/DashboardView';
 import { ContactsView } from './components/ContactsView';
 import { ContactDrawer } from './components/ContactDrawer';
@@ -14,7 +15,9 @@ import { AICopilotView } from './components/AICopilotView';
 import { AuditLogView } from './components/AuditLogView';
 import { SettingsView } from './components/SettingsView';
 import { KeyboardShortcutsModal } from './components/KeyboardShortcutsModal';
+import { TourEngine } from './components/tour/TourEngine';
 import { LoginView } from './components/LoginView';
+import { SetPasswordView } from './components/SetPasswordView';
 import { apiClient } from './services/apiClient';
 import { supabase } from './services/supabaseClient';
 import { Tenant, User, Contact, Campaign, MessageTemplate, ContactList, AuditLogEntry, TimelineEvent } from './types';
@@ -31,6 +34,8 @@ export default function App() {
   const [rateLimitNotice, setRateLimitNotice] = useState<string | null>(null);
   const [isAuthenticated, setIsAuthenticated] = useState<boolean>(false);
   const [authLoading, setAuthLoading] = useState<boolean>(true);
+  const [needsPasswordSetup, setNeedsPasswordSetup] = useState<boolean>(false);
+  const [pendingAuthUser, setPendingAuthUser] = useState<any>(null);
 
   // Core PostgreSQL Data
   const [tenant, setTenant] = useState<Tenant | null>(null);
@@ -48,6 +53,14 @@ export default function App() {
   const [selectedCampaignId, setSelectedCampaignId] = useState<string | null>(null);
   const [isSendingWorkspaceOpen, setIsSendingWorkspaceOpen] = useState(false);
   const [shortcutsModalOpen, setShortcutsModalOpen] = useState(false);
+  const [guideModalOpen, setGuideModalOpen] = useState(false);
+  const [tourCompleted, setTourCompleted] = useState<boolean>(() => {
+    try {
+      return typeof window !== 'undefined' && localStorage.getItem('reachout_tour_dismissed') === 'true';
+    } catch {
+      return false;
+    }
+  });
   const [aiTemplateSeed, setAiTemplateSeed] = useState<string>('');
 
   // Fetch all initial data from Supabase via single aggregated bootstrap request
@@ -74,12 +87,30 @@ export default function App() {
       const { data: { session } } = await supabase.auth.getSession();
       if (!session) {
         setIsAuthenticated(false);
+        setNeedsPasswordSetup(false);
+        setPendingAuthUser(null);
         setAuthLoading(false);
         return;
       }
 
       setIsAuthenticated(true);
       setSchemaError(null);
+
+      // Check if user is a Google OAuth user without an account password configured
+      const authUser = session.user;
+      const isGoogleUser = 
+        authUser.app_metadata?.provider === 'google' ||
+        authUser.app_metadata?.providers?.includes('google') ||
+        authUser.identities?.some((i: any) => i.provider === 'google');
+      const hasPasswordSet = Boolean(authUser.user_metadata?.has_password_set);
+
+      if (isGoogleUser && !hasPasswordSet) {
+        setNeedsPasswordSetup(true);
+        setPendingAuthUser(authUser);
+        setAuthLoading(false);
+        return;
+      }
+      setNeedsPasswordSetup(false);
 
       // Use single aggregated bootstrap endpoint to load workspace state
       try {
@@ -93,6 +124,7 @@ export default function App() {
           if (bootstrap.lists) setLists(bootstrap.lists);
           if (bootstrap.stats) setStats(bootstrap.stats);
           if (bootstrap.auditLogs) setAuditLogs(bootstrap.auditLogs);
+          setSchemaError(null);
         }
       } catch (bootErr: any) {
         if (bootErr?.code === 'PGRST205' || bootErr?.message?.includes('schema cache')) {
@@ -125,7 +157,21 @@ export default function App() {
     supabase.auth.getSession().then(({ data: { session } }) => {
       if (session) {
         setIsAuthenticated(true);
-        loadData();
+        const authUser = session.user;
+        const isGoogleUser = 
+          authUser.app_metadata?.provider === 'google' ||
+          authUser.app_metadata?.providers?.includes('google') ||
+          authUser.identities?.some((i: any) => i.provider === 'google');
+        const hasPasswordSet = Boolean(authUser.user_metadata?.has_password_set);
+
+        if (isGoogleUser && !hasPasswordSet) {
+          setNeedsPasswordSetup(true);
+          setPendingAuthUser(authUser);
+          setAuthLoading(false);
+        } else {
+          setNeedsPasswordSetup(false);
+          loadData();
+        }
       } else {
         setIsAuthenticated(false);
         setAuthLoading(false);
@@ -134,13 +180,29 @@ export default function App() {
 
     // 2. Listen for auth state changes (sign in, sign out, token refresh)
     const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
-      if (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED') {
+      if (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED' || event === 'USER_UPDATED') {
         if (session) {
           setIsAuthenticated(true);
-          loadData();
+          const authUser = session.user;
+          const isGoogleUser = 
+            authUser.app_metadata?.provider === 'google' ||
+            authUser.app_metadata?.providers?.includes('google') ||
+            authUser.identities?.some((i: any) => i.provider === 'google');
+          const hasPasswordSet = Boolean(authUser.user_metadata?.has_password_set);
+
+          if (isGoogleUser && !hasPasswordSet) {
+            setNeedsPasswordSetup(true);
+            setPendingAuthUser(authUser);
+            setAuthLoading(false);
+          } else {
+            setNeedsPasswordSetup(false);
+            loadData();
+          }
         }
       } else if (event === 'SIGNED_OUT') {
         setIsAuthenticated(false);
+        setNeedsPasswordSetup(false);
+        setPendingAuthUser(null);
         setUser(null);
         setTenant(null);
         setContacts([]);
@@ -267,6 +329,7 @@ export default function App() {
           darkMode={darkMode}
           setDarkMode={setDarkMode}
           onOpenShortcuts={() => setShortcutsModalOpen(true)}
+          onOpenGuide={() => setGuideModalOpen(true)}
           onToggleKillSwitch={() => handleToggleKillSwitch('Toggled via top navigation bar')}
           onSignOut={handleSignOut}
         />
@@ -321,10 +384,9 @@ export default function App() {
                   <span>Required Environment Configuration:</span>
                 </div>
                 <div className="bg-neutral-950 text-neutral-200 p-4 rounded-xl font-mono space-y-1.5 overflow-x-auto">
-                  <div className="text-neutral-500"># Set in AI Studio Secrets or environment variables</div>
-                  <div><span className="text-emerald-400">SUPABASE_URL</span>="https://&lt;project-ref&gt;.supabase.co"</div>
-                  <div><span className="text-emerald-400">SUPABASE_ANON_KEY</span>="eyJhbGciOiJIUzI1NiIsInR5cCI6..."</div>
-                  <div><span className="text-emerald-400">SUPABASE_SERVICE_ROLE_KEY</span>="eyJhbGciOiJIUzI1Ni..."</div>
+                  <div className="text-neutral-500"># Required in .env:</div>
+                  <div><span className="text-emerald-400">SUPABASE_URL</span></div>
+                  <div><span className="text-emerald-400">SUPABASE_ANON_KEY</span></div>
                 </div>
               </div>
 
@@ -365,6 +427,20 @@ export default function App() {
         ) : !isAuthenticated ? (
           /* 2. Supabase Authentication Gate (Real Supabase Auth Email/Password & Google OAuth) */
           <LoginView onSuccess={loadData} />
+        ) : needsPasswordSetup && pendingAuthUser ? (
+          /* 2.5 Google OAuth Password Creation & Profile Link Gate */
+          <SetPasswordView
+            initialFullName={
+              pendingAuthUser.user_metadata?.full_name ||
+              pendingAuthUser.user_metadata?.name ||
+              ''
+            }
+            userEmail={pendingAuthUser.email || ''}
+            onSuccess={(_updatedName) => {
+              setNeedsPasswordSetup(false);
+              loadData();
+            }}
+          />
         ) : schemaError ? (
           /* 3. Schema Setup / Migration Required View */
           <div className="flex-1 flex items-center justify-center p-6">
@@ -437,10 +513,12 @@ export default function App() {
                 setIsSendingWorkspaceOpen(false);
               }}
               activeCampaignsCount={campaigns.filter(c => c.status === 'ACTIVE').length}
+              user={user}
+              onOpenGuide={() => setGuideModalOpen(true)}
             />
 
             {/* Main Workspace Stage */}
-            <main className="flex-1 overflow-y-auto p-4 md:p-6 bg-white/50 dark:bg-neutral-950/50 backdrop-blur-xs">
+            <main className={`flex-1 overflow-y-auto p-3 sm:p-4 md:p-6 ${isSendingWorkspaceOpen ? 'pb-4' : 'pb-24 md:pb-6'} bg-neutral-50/50 dark:bg-neutral-950/50`}>
               {/* If Manual Sending Workspace is active */}
               {isSendingWorkspaceOpen && selectedCampaign ? (
                 <ManualSendingWorkspace
@@ -449,29 +527,33 @@ export default function App() {
                   contacts={contacts}
                   onBack={() => setIsSendingWorkspaceOpen(false)}
                   onPrepare={async (recipientId) => {
+                    // Split-second optimistic update: instantly show OPENED in UI
+                    setCampaignRecipients(prev => prev.map(r => r.id === recipientId ? { ...r, status: 'OPENED' } : r));
                     const res = await apiClient.prepareRecipient(selectedCampaign.id, recipientId);
-                    const updatedCamp = await apiClient.getCampaign(selectedCampaign.id);
-                    if (updatedCamp?.recipients) setCampaignRecipients(updatedCamp.recipients);
-                    loadData();
+                    if (res?.resolvedMessage) {
+                      setCampaignRecipients(prev => prev.map(r => r.id === recipientId ? { ...r, status: 'OPENED', resolvedMessage: res.resolvedMessage } : r));
+                    }
                     return res;
                   }}
                   onMarkSent={async (recipientId) => {
+                    // Split-second optimistic update: instantly mark SENT and increment counter
+                    setCampaignRecipients(prev => prev.map(r => r.id === recipientId ? { ...r, status: 'USER_SENT', sentAt: new Date().toISOString() } : r));
+                    setCampaigns(prev => prev.map(c => c.id === selectedCampaign.id ? { ...c, sentCount: (c.sentCount || 0) + 1 } : c));
+                    setStats((prev: any) => prev ? { ...prev, sentToday: (prev.sentToday || 0) + 1 } : prev);
+                    // Background persistence - zero UI lag
                     const res = await apiClient.markRecipientSent(selectedCampaign.id, recipientId);
-                    const updatedCamp = await apiClient.getCampaign(selectedCampaign.id);
-                    if (updatedCamp?.recipients) setCampaignRecipients(updatedCamp.recipients);
-                    loadData();
                     return res;
                   }}
                   onSkip={async (recipientId, reason) => {
+                    // Split-second optimistic update: instantly mark SKIPPED and advance
+                    setCampaignRecipients(prev => prev.map(r => r.id === recipientId ? { ...r, status: 'SKIPPED', errorReason: reason || 'Manually skipped' } : r));
+                    setCampaigns(prev => prev.map(c => c.id === selectedCampaign.id ? { ...c, skippedCount: (c.skippedCount || 0) + 1 } : c));
                     await apiClient.skipRecipient(selectedCampaign.id, recipientId, reason);
-                    const updatedCamp = await apiClient.getCampaign(selectedCampaign.id);
-                    if (updatedCamp?.recipients) setCampaignRecipients(updatedCamp.recipients);
-                    loadData();
                   }}
                   onToggleBlock={handleToggleBlock}
                   onPauseCampaign={async () => {
+                    setCampaigns(prev => prev.map(c => c.id === selectedCampaign.id ? { ...c, status: 'PAUSED' } : c));
                     await apiClient.updateCampaignStatus(selectedCampaign.id, 'PAUSED');
-                    loadData();
                   }}
                   userRole={user?.role || 'VIEWER'}
                 />
@@ -483,12 +565,26 @@ export default function App() {
                   userRole={user?.role || 'VIEWER'}
                   onBack={() => setSelectedCampaignId(null)}
                   onUpdateStatus={async (newStatus) => {
+                    setCampaigns(prev => prev.map(c => c.id === selectedCampaign.id ? { ...c, status: newStatus as any } : c));
                     await apiClient.updateCampaignStatus(selectedCampaign.id, newStatus);
-                    loadData();
                   }}
                   onEnterSendingWorkspace={() => setIsSendingWorkspaceOpen(true)}
                   onSendTest={async (testPhone, testName) => {
                     return apiClient.sendTest(selectedCampaign.id, testPhone, testName);
+                  }}
+                  onSyncTemplate={async () => {
+                    const res = await apiClient.syncCampaignTemplate(selectedCampaign.id);
+                    const updatedCamp = await apiClient.getCampaign(selectedCampaign.id);
+                    if (updatedCamp?.recipients) setCampaignRecipients(updatedCamp.recipients);
+                    if (updatedCamp) {
+                      setCampaigns(prev => prev.map(c => c.id === selectedCampaign.id ? { ...c, templateSnapshot: updatedCamp.templateSnapshot } : c));
+                    }
+                    return res;
+                  }}
+                  onDeleteCampaign={async (id: string) => {
+                    setCampaigns(prev => prev.filter(c => c.id !== id));
+                    setSelectedCampaignId(null);
+                    await apiClient.deleteCampaign(id);
                   }}
                 />
               ) : activeTab === 'dashboard' ? (
@@ -497,10 +593,15 @@ export default function App() {
                   stats={stats}
                   onNavigate={setActiveTab}
                   onOpenCampaign={(campId: string) => setSelectedCampaignId(campId)}
+                  user={user}
+                  onOpenGuide={() => setGuideModalOpen(true)}
+                  tourCompleted={tourCompleted}
+                  onDismissTourBanner={() => setTourCompleted(true)}
                 />
               ) : activeTab === 'contacts' ? (
                 <ContactsView
                   contacts={contacts}
+                  lists={lists}
                   userRole={user?.role || 'VIEWER'}
                   onSelectContact={handleSelectContact}
                   onAddContact={async (contactData: any) => {
@@ -508,12 +609,57 @@ export default function App() {
                     loadData();
                   }}
                   onDeleteContact={async (id: string) => {
+                    setContacts(prev => prev.filter(c => c.id !== id));
                     await apiClient.deleteContact(id);
+                    loadData();
+                  }}
+                  onBulkDelete={async (ids: string[]) => {
+                    const idSet = new Set(ids);
+                    setContacts(prev => prev.filter(c => !idSet.has(c.id)));
+                    await apiClient.bulkDeleteContacts(ids);
+                    loadData();
+                  }}
+                  onBulkUpdate={async (contactIds: string[], updates: any) => {
+                    await apiClient.bulkUpdateContacts(contactIds, updates);
+                    loadData();
+                  }}
+                  onAddToList={async (listId: string, contactIds: string[]) => {
+                    await apiClient.addMembersToList(listId, contactIds);
+                    loadData();
+                  }}
+                  onCreateList={async (data: any) => {
+                    if (data.syncToDatabase && data.contactIds && data.contactIds.length > 0 && data.leadStatus && data.leadStatus !== 'ALL') {
+                      try {
+                        await apiClient.bulkUpdateContacts(data.contactIds, {
+                          leadStatus: data.leadStatus,
+                          ...(data.city && data.city !== 'ALL' ? { city: data.city } : {})
+                        });
+                      } catch (syncErr) {
+                        console.warn('Failed to bulk sync contact segments to DB:', syncErr);
+                      }
+                    }
+                    await apiClient.createContactList(data);
                     loadData();
                   }}
                 />
               ) : activeTab === 'import' ? (
                 <ImportWizardView
+                  contacts={contacts}
+                  lists={lists}
+                  onCreateList={async (data: any) => {
+                    if (data.syncToDatabase && data.contactIds && data.contactIds.length > 0 && data.leadStatus && data.leadStatus !== 'ALL') {
+                      try {
+                        await apiClient.bulkUpdateContacts(data.contactIds, {
+                          leadStatus: data.leadStatus,
+                          ...(data.city && data.city !== 'ALL' ? { city: data.city } : {})
+                        });
+                      } catch (syncErr) {
+                        console.warn('Failed to bulk sync contact segments to DB:', syncErr);
+                      }
+                    }
+                    await apiClient.createContactList(data);
+                    loadData();
+                  }}
                   onImportComplete={() => {
                     setActiveTab('contacts');
                     loadData();
@@ -525,6 +671,16 @@ export default function App() {
                   contacts={contacts}
                   userRole={user?.role || 'VIEWER'}
                   onCreateList={async (data) => {
+                    if (data.syncToDatabase && data.contactIds && data.contactIds.length > 0 && data.leadStatus && data.leadStatus !== 'ALL') {
+                      try {
+                        await apiClient.bulkUpdateContacts(data.contactIds, {
+                          leadStatus: data.leadStatus,
+                          ...(data.city && data.city !== 'ALL' ? { city: data.city } : {})
+                        });
+                      } catch (syncErr) {
+                        console.warn('Failed to bulk sync contact segments to DB:', syncErr);
+                      }
+                    }
                     await apiClient.createContactList(data);
                     loadData();
                   }}
@@ -537,16 +693,45 @@ export default function App() {
                   templates={templates}
                   userRole={user?.role || 'VIEWER'}
                   onCreateTemplate={async (data) => {
-                    await apiClient.createTemplate(data);
-                    loadData();
+                    const res = await apiClient.createTemplate(data);
+                    if (res?.data) {
+                      setTemplates(prev => [res.data, ...prev]);
+                    } else {
+                      loadData();
+                    }
                   }}
                   onUpdateTemplate={async (id, data) => {
+                    // Split-second optimistic template update
+                    setTemplates(prev => prev.map(t => t.id === id ? { ...t, ...data } : t));
+                    // Optimistically cascade snapshot to matching campaigns in memory
+                    setCampaigns(prev => prev.map(c => {
+                      if (c.templateId === id) {
+                        return {
+                          ...c,
+                          templateSnapshot: {
+                            ...c.templateSnapshot,
+                            body: data.body !== undefined ? data.body : c.templateSnapshot?.body,
+                            name: data.name !== undefined ? data.name : c.templateSnapshot?.name,
+                            subject: data.subject !== undefined ? data.subject : c.templateSnapshot?.subject,
+                          }
+                        };
+                      }
+                      return c;
+                    }));
+                    // Server updates template AND cascades re-resolved messages to pending recipients
                     await apiClient.updateTemplate(id, data);
-                    loadData();
+                    // If current campaign uses this template, refresh recipients with updated resolved messages
+                    if (selectedCampaignId) {
+                      const cur = campaigns.find(c => c.id === selectedCampaignId);
+                      if (cur && cur.templateId === id) {
+                        const updatedCamp = await apiClient.getCampaign(selectedCampaignId);
+                        if (updatedCamp?.recipients) setCampaignRecipients(updatedCamp.recipients);
+                      }
+                    }
                   }}
                   onDeleteTemplate={async (id) => {
+                    setTemplates(prev => prev.filter(t => t.id !== id));
                     await apiClient.deleteTemplate(id);
-                    loadData();
                   }}
                   onOpenAICopilotWithTemplate={(text: string) => {
                     setAiTemplateSeed(text);
@@ -562,8 +747,16 @@ export default function App() {
                   onSelectCampaign={(id: string) => setSelectedCampaignId(id)}
                   onCreateCampaign={async (data) => {
                     const res = await apiClient.createCampaign(data);
-                    loadData();
-                    if (res?.data?.id) setSelectedCampaignId(res.data.id);
+                    if (res?.data) {
+                      setCampaigns(prev => [res.data, ...prev]);
+                      setSelectedCampaignId(res.data.id);
+                    } else {
+                      loadData();
+                    }
+                  }}
+                  onDeleteCampaign={async (id: string) => {
+                    setCampaigns(prev => prev.filter(c => c.id !== id));
+                    await apiClient.deleteCampaign(id);
                   }}
                 />
               ) : activeTab === 'ai' ? (
@@ -581,6 +774,7 @@ export default function App() {
                   tenant={tenant}
                   onExportContacts={handleExportContacts}
                   userRole={user?.role || 'VIEWER'}
+                  user={user}
                   onToggleKillSwitch={() => handleToggleKillSwitch('Toggled via Settings')}
                 />
               ) : null}
@@ -605,6 +799,29 @@ export default function App() {
                   await apiClient.updateContact(contactId, { preferences: newPrefs });
                   loadData();
                 }}
+                onDeleteContact={async (contactId) => {
+                  setContacts(prev => prev.filter(c => c.id !== contactId));
+                  await apiClient.deleteContact(contactId);
+                  setSelectedContact(null);
+                  loadData();
+                }}
+              />
+            )}
+
+            {/* Mobile Bottom Navigation Bar (Smartphones only) */}
+            {!isSendingWorkspaceOpen && (
+              <MobileBottomNav
+                activeTab={activeTab}
+                setActiveTab={(tab) => {
+                  setActiveTab(tab);
+                  setSelectedCampaignId(null);
+                  setIsSendingWorkspaceOpen(false);
+                }}
+                activeCampaignsCount={campaigns.filter(c => c.status === 'ACTIVE').length}
+                user={user}
+                tenant={tenant}
+                onOpenGuide={() => setGuideModalOpen(true)}
+                onSignOut={handleSignOut}
               />
             )}
           </div>
@@ -614,6 +831,19 @@ export default function App() {
         <KeyboardShortcutsModal
           isOpen={shortcutsModalOpen}
           onClose={() => setShortcutsModalOpen(false)}
+        />
+
+        {/* Context-Aware Interactive Product Tour Engine */}
+        <TourEngine
+          isActive={guideModalOpen}
+          onClose={() => setGuideModalOpen(false)}
+          activeTab={activeTab}
+          onNavigate={(tab) => {
+            setActiveTab(tab);
+            setSelectedCampaignId(null);
+            setIsSendingWorkspaceOpen(false);
+          }}
+          onComplete={() => setTourCompleted(true)}
         />
       </div>
     </div>

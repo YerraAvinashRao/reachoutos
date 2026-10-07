@@ -108,6 +108,7 @@ export const TemplatesView: React.FC<TemplatesViewProps> = ({
 
         {userRole !== 'VIEWER' && (
           <button
+            data-tour="templates.new-btn"
             onClick={handleOpenCreate}
             className="flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-neutral-900 dark:bg-white text-white dark:text-neutral-900 text-xs font-medium hover:bg-neutral-800 dark:hover:bg-neutral-100 transition shadow-sm"
           >

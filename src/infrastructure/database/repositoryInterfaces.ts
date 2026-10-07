@@ -27,10 +27,12 @@ export interface ICampaignRepository {
   findById(id: string, tenantId?: string): Promise<Campaign | null>;
   create(campaign: Omit<Campaign, 'id' | 'createdAt' | 'recipientsCount' | 'sentCount' | 'openedCount' | 'skippedCount' | 'blockedCount'>): Promise<Campaign>;
   update(id: string, updates: Partial<Campaign>, tenantId?: string): Promise<Campaign>;
+  updateStatus?(id: string, tenantId: string, status: any): Promise<Campaign>;
   getRecipients(campaignId: string): Promise<CampaignRecipient[]>;
   getRecipientById(recipientId: string): Promise<CampaignRecipient | null>;
   updateRecipient(recipientId: string, updates: Partial<CampaignRecipient>): Promise<CampaignRecipient>;
-  addRecipients(recipients: Array<Omit<CampaignRecipient, 'id' | 'createdAt'>>): Promise<number>;
+  addRecipients(recipients: Array<Omit<CampaignRecipient, 'id' | 'createdAt'>>, tenantId?: string): Promise<number>;
+  delete(id: string, tenantId?: string): Promise<void>;
 }
 
 export interface ITemplateRepository {
@@ -57,6 +59,7 @@ export interface IAuditRepository {
 export interface ITenantRepository {
   getTenant(id: string): Promise<Tenant | null>;
   updateKillSwitch(id: string, isActive: boolean, reason?: string, by?: string): Promise<Tenant>;
+  toggleKillSwitch?(id: string, isActive: boolean, reason?: string, by?: string): Promise<Tenant>;
   getCurrentUser(): Promise<User>;
-  switchUserRole(role: Role): Promise<User>;
+  switchUserRole?(role: Role): Promise<User>;
 }

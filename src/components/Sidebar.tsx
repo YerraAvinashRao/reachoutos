@@ -9,8 +9,11 @@ import {
   Sparkles, 
   History, 
   Settings,
-  ShieldCheck
+  ShieldCheck,
+  BookOpen
 } from 'lucide-react';
+
+import { Tenant, User, Role } from '../types';
 
 export type NavTab = 
   | 'dashboard'
@@ -27,12 +30,16 @@ interface SidebarProps {
   activeTab: NavTab;
   setActiveTab: (tab: NavTab) => void;
   activeCampaignsCount: number;
+  user?: User | null;
+  onOpenGuide?: () => void;
 }
 
 export const Sidebar: React.FC<SidebarProps> = ({
   activeTab,
   setActiveTab,
-  activeCampaignsCount
+  activeCampaignsCount,
+  user,
+  onOpenGuide
 }) => {
   const navItems = [
     { id: 'dashboard' as NavTab, label: 'Dashboard', icon: LayoutDashboard },
@@ -52,7 +59,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   ];
 
   return (
-    <aside className="w-56 border-r border-neutral-200 dark:border-neutral-800 bg-neutral-50/50 dark:bg-neutral-900/50 flex flex-col justify-between p-3 select-none">
+    <aside className="hidden md:flex w-56 border-r border-neutral-200 dark:border-neutral-800 bg-neutral-50/50 dark:bg-neutral-900/50 flex-col justify-between p-3 select-none shrink-0">
       <div className="space-y-1">
         <div className="px-2 py-1 text-[11px] font-semibold text-neutral-400 dark:text-neutral-500 uppercase tracking-wider">
           Workspace
@@ -63,6 +70,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
           return (
             <button
               key={item.id}
+              data-tour={`sidebar.${item.id}`}
               onClick={() => setActiveTab(item.id)}
               className={`w-full flex items-center justify-between px-2.5 py-2 rounded-md text-xs font-medium transition ${
                 isActive
@@ -87,6 +95,42 @@ export const Sidebar: React.FC<SidebarProps> = ({
           );
         })}
       </div>
+
+      {/* User Profile Card */}
+      {user && (
+        <div className="p-2.5 rounded-lg border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 flex items-center gap-2.5 shadow-xs mb-2">
+          <div className="w-7 h-7 rounded-full bg-neutral-900 dark:bg-neutral-100 text-white dark:text-neutral-900 flex items-center justify-center font-bold text-xs shrink-0">
+            {user.name ? user.name.charAt(0).toUpperCase() : 'U'}
+          </div>
+          <div className="flex-1 min-w-0">
+            <div className="font-semibold text-xs text-neutral-900 dark:text-neutral-100 truncate">
+              {user.name || 'Workspace User'}
+            </div>
+            <div className="text-[10px] text-neutral-400 dark:text-neutral-500 truncate font-mono">
+              {user.email}
+            </div>
+          </div>
+          <span className="text-[9px] font-bold uppercase px-1.5 py-0.5 rounded bg-neutral-100 dark:bg-neutral-800 text-neutral-600 dark:text-neutral-300">
+            {user.role}
+          </span>
+        </div>
+      )}
+
+      {/* Interactive App Guide Launch Button */}
+      {onOpenGuide && (
+        <button
+          onClick={onOpenGuide}
+          className="w-full mb-2 p-2.5 rounded-lg border border-emerald-200/80 dark:border-emerald-800/60 bg-emerald-50/70 dark:bg-emerald-950/30 hover:bg-emerald-100 dark:hover:bg-emerald-900/40 text-emerald-800 dark:text-emerald-300 text-xs font-semibold flex items-center justify-between transition cursor-pointer shadow-xs"
+        >
+          <div className="flex items-center gap-2">
+            <BookOpen className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
+            <span>Interactive Guide</span>
+          </div>
+          <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-emerald-200/60 dark:bg-emerald-800 text-emerald-900 dark:text-emerald-100">
+            Tour
+          </span>
+        </button>
+      )}
 
       {/* Compliance & Policy Footnote */}
       <div className="p-2.5 rounded-lg border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 text-[11px] text-neutral-500 space-y-1">

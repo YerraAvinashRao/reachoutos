@@ -1,3 +1,4 @@
+import 'dotenv/config';
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
 import crypto from 'crypto';
 import {
@@ -43,10 +44,15 @@ export class SupabaseDatabaseAdapter {
   public readonly isConfigured: boolean;
 
   constructor(config?: { url?: string; key?: string; forceUnconfigured?: boolean }) {
-    const supabaseUrl = config?.forceUnconfigured ? undefined : (config?.url || process.env.SUPABASE_URL);
-    const supabaseKey = config?.forceUnconfigured ? undefined : (config?.key || process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY);
+    const defaultUrl = 'https://cxzynykcdxadhhkjsmgs.supabase.co';
+    const defaultKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImN4enlueWtjZHhhZGhoa2pzbWdzIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTEyNjU3ODQsImV4cCI6MjEwNjg0MTc4NH0.agjrQeFqscfKF5aN9rUkl4sgL1J_mjU7il3sL6olTjI';
+    const rawUrl = config?.url || process.env.SUPABASE_URL || defaultUrl;
+    const supabaseUrl = config?.forceUnconfigured ? undefined : (rawUrl.includes('your-project-ref') ? defaultUrl : rawUrl);
+    const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY && !process.env.SUPABASE_SERVICE_ROLE_KEY.includes('your-supabase') ? process.env.SUPABASE_SERVICE_ROLE_KEY : undefined;
+    const rawKey = config?.key || serviceKey || process.env.SUPABASE_ANON_KEY || defaultKey;
+    const supabaseKey = config?.forceUnconfigured ? undefined : (rawKey.includes('your-supabase') ? defaultKey : rawKey);
 
-    if (supabaseUrl && supabaseKey && !supabaseUrl.includes('your-project-ref')) {
+    if (supabaseUrl && supabaseKey && !supabaseUrl.includes('your-project-ref') && !supabaseKey.includes('your-supabase')) {
       this.client = createClient(supabaseUrl, supabaseKey, {
         auth: {
           persistSession: false,
@@ -75,42 +81,67 @@ export class SupabaseDatabaseAdapter {
   contactsRepo: IContactRepository = {
     findAll: async (tenantId: string, search?: string, tag?: string, listId?: string, status?: string) => {
       const client = this.getClient();
-      let query = client
-        .from('contacts')
-        .select('*')
-        .eq('tenant_id', tenantId)
-        .order('created_at', { ascending: false });
 
-      if (search) {
-        query = query.or(`display_name.ilike.%${search}%,company_name.ilike.%${search}%,phone.ilike.%${search}%,email.ilike.%${search}%,city.ilike.%${search}%`);
-      }
-      if (tag) {
-        query = query.contains('tags', [tag]);
-      }
-      if (status) {
-        query = query.eq('status', status);
-      }
-
+      let listMemberIds: string[] | null = null;
       if (listId) {
-        // Query contact list to get contact_ids
-        const { data: listData, error: listErr } = await client
-          .from('contact_lists')
-          .select('contact_ids')
-          .eq('id', listId)
-          .eq('tenant_id', tenantId)
-          .single();
+        // Query normalized junction table contact_list_members
+        const { data: listMembers, error: listErr } = await client
+          .from('contact_list_members')
+          .select('contact_id')
+          .eq('list_id', listId)
+          .eq('tenant_id', tenantId);
         if (listErr) throw listErr;
-        if (listData && listData.contact_ids && listData.contact_ids.length > 0) {
-          query = query.in('id', listData.contact_ids);
+        if (listMembers && listMembers.length > 0) {
+          listMemberIds = listMembers.map((m: any) => m.contact_id);
         } else {
           return [];
         }
       }
 
-      const { data, error } = await query;
-      if (error) throw error;
+      // Supabase / PostgREST limits single queries to 1,000 rows by default.
+      // Auto-paginate in batches to retrieve all matching contacts without truncation.
+      const allRows: any[] = [];
+      const PAGE_SIZE = 1000;
+      let from = 0;
+      let hasMore = true;
 
-      return (data || []).map(this.mapDbContactToDomain);
+      while (hasMore) {
+        let query = client
+          .from('contacts')
+          .select('*')
+          .eq('tenant_id', tenantId)
+          .order('display_name', { ascending: true })
+          .range(from, from + PAGE_SIZE - 1);
+
+        if (search) {
+          query = query.or(`display_name.ilike.%${search}%,company_name.ilike.%${search}%,phone.ilike.%${search}%,email.ilike.%${search}%,city.ilike.%${search}%`);
+        }
+        if (tag) {
+          query = query.contains('tags', [tag]);
+        }
+        if (status) {
+          query = query.eq('status', status);
+        }
+        if (listMemberIds && listMemberIds.length > 0) {
+          query = query.in('id', listMemberIds);
+        }
+
+        const { data, error } = await query;
+        if (error) throw error;
+
+        if (data && data.length > 0) {
+          allRows.push(...data);
+          if (data.length < PAGE_SIZE) {
+            hasMore = false;
+          } else {
+            from += PAGE_SIZE;
+          }
+        } else {
+          hasMore = false;
+        }
+      }
+
+      return allRows.map(row => this.mapDbContactToDomain(row));
     },
 
     findById: async (id: string, tenantId?: string) => {
@@ -159,7 +190,17 @@ export class SupabaseDatabaseAdapter {
       return this.mapDbContactToDomain(data);
     },
 
-    update: async (id: string, updates: Partial<Contact>, tenantId?: string) => {
+    update: async (id: string, updatesOrTenantId: any, tenantIdOrUpdates?: any) => {
+      let updates: Partial<Contact>;
+      let tenantId: string | undefined;
+      if (typeof updatesOrTenantId === 'string') {
+        tenantId = updatesOrTenantId;
+        updates = tenantIdOrUpdates || {};
+      } else {
+        updates = updatesOrTenantId || {};
+        tenantId = tenantIdOrUpdates;
+      }
+
       const client = this.getClient();
       const dbUpdates: Record<string, any> = {
         updated_at: new Date().toISOString()
@@ -195,6 +236,19 @@ export class SupabaseDatabaseAdapter {
 
     delete: async (id: string, tenantId?: string) => {
       const client = this.getClient();
+      // Clean up junction and child records to guarantee referential safety
+      let clmQuery = client.from('contact_list_members').delete().eq('contact_id', id);
+      if (tenantId) clmQuery = clmQuery.eq('tenant_id', tenantId);
+      await clmQuery;
+
+      let tmQuery = client.from('contact_timeline').delete().eq('contact_id', id);
+      if (tenantId) tmQuery = tmQuery.eq('tenant_id', tenantId);
+      await tmQuery;
+
+      let crQuery = client.from('campaign_recipients').delete().eq('contact_id', id);
+      if (tenantId) crQuery = crQuery.eq('tenant_id', tenantId);
+      await crQuery;
+
       let query = client.from('contacts').delete().eq('id', id);
       if (tenantId) query = query.eq('tenant_id', tenantId);
       const { error } = await query;
@@ -203,51 +257,97 @@ export class SupabaseDatabaseAdapter {
 
     bulkCreate: async (contactsData) => {
       const client = this.getClient();
-      const insertRows = contactsData.map(c => ({
-        tenant_id: c.tenantId,
-        first_name: c.firstName,
-        last_name: c.lastName,
-        display_name: c.displayName,
-        company_name: c.companyName,
-        job_title: c.jobTitle,
-        phone: c.phone,
-        email: c.email,
-        city: c.city,
-        state: c.state,
-        country: c.country,
-        status: c.status,
-        source: c.source,
-        lead_status: c.leadStatus,
-        notes: c.notes,
-        tags: c.tags,
-        custom_fields: c.customFields,
-        is_globally_blocked: c.isGloballyBlocked
-      }));
+      const E164_REGEX = /^\+[1-9][0-9]{7,14}$/;
+      const insertRows = contactsData
+        .filter(c => c && c.phone && E164_REGEX.test(c.phone.trim()))
+        .map(c => ({
+          tenant_id: c.tenantId,
+          first_name: c.firstName,
+          last_name: c.lastName,
+          display_name: c.displayName,
+          company_name: c.companyName,
+          job_title: c.jobTitle,
+          phone: c.phone.trim(),
+          email: c.email,
+          city: c.city,
+          state: c.state,
+          country: c.country,
+          status: c.status,
+          source: c.source,
+          lead_status: c.leadStatus || 'LEAD',
+          notes: c.notes,
+          tags: c.tags,
+          custom_fields: c.customFields,
+          is_globally_blocked: c.isGloballyBlocked
+        }));
 
-      // Upsert on conflict (tenant_id, phone)
-      const { data, error } = await client
-        .from('contacts')
-        .upsert(insertRows, { onConflict: 'tenant_id, phone' })
-        .select('id');
+      // Deduplicate rows within this batch by (tenant_id, phone) to prevent PostgreSQL constraint collision
+      const uniqueMap = new Map<string, any>();
+      for (const row of insertRows) {
+        const key = `${row.tenant_id}:${row.phone}`;
+        uniqueMap.set(key, row);
+      }
+      const uniqueRows = Array.from(uniqueMap.values());
 
-      if (error) throw error;
+      let totalCreated = 0;
+      const chunkSize = 200;
+      for (let i = 0; i < uniqueRows.length; i += chunkSize) {
+        const chunk = uniqueRows.slice(i, i + chunkSize);
+        const { data, error } = await client
+          .from('contacts')
+          .upsert(chunk, { onConflict: 'tenant_id, phone' })
+          .select('id');
+
+        if (error) throw error;
+        totalCreated += data ? data.length : chunk.length;
+      }
+
       return {
-        created: data ? data.length : contactsData.length,
+        created: totalCreated,
         updated: 0,
-        skipped: 0
+        skipped: contactsData.length - uniqueRows.length
       };
     },
 
     addTimelineEvent: async (eventData) => {
       const client = this.getClient();
+
+      // Resolve tenant_id
+      let resolvedTenantId = eventData.tenantId;
+      if (!resolvedTenantId) {
+        const { data: c } = await client
+          .from('contacts')
+          .select('tenant_id')
+          .eq('id', eventData.contactId)
+          .maybeSingle();
+        resolvedTenantId = c?.tenant_id || 'a0000000-0000-0000-0000-000000000001';
+      }
+
+      // Resolve actor_id (must be a valid UUID in tenant_members)
+      let resolvedActorId = eventData.actorId;
+      const isUuid = typeof resolvedActorId === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(resolvedActorId);
+      if (!isUuid) {
+        const { data: member } = await client
+          .from('tenant_members')
+          .select('user_id')
+          .eq('tenant_id', resolvedTenantId)
+          .limit(1)
+          .maybeSingle();
+        resolvedActorId = member?.user_id || '7f2b33ed-ef19-44fc-a04d-1f54051b07c4';
+      }
+
+      const actorName = eventData.actorName || eventData.actor || 'System / Operator';
+
       const { data, error } = await client
         .from('contact_timeline')
         .insert({
           contact_id: eventData.contactId,
+          tenant_id: resolvedTenantId,
           event_type: eventData.eventType,
-          actor: eventData.actor,
+          actor_id: resolvedActorId,
+          actor_name: actorName,
           description: eventData.description,
-          campaign_name: eventData.campaignName,
+          campaign_name: eventData.campaignName || null,
           metadata: eventData.metadata || {}
         })
         .select()
@@ -257,8 +357,11 @@ export class SupabaseDatabaseAdapter {
       return {
         id: data.id,
         contactId: data.contact_id,
+        tenantId: data.tenant_id,
         eventType: data.event_type,
-        actor: data.actor,
+        actor: data.actor_name,
+        actorId: data.actor_id,
+        actorName: data.actor_name,
         description: data.description,
         campaignName: data.campaign_name,
         metadata: data.metadata,
@@ -278,8 +381,11 @@ export class SupabaseDatabaseAdapter {
       return (data || []).map(d => ({
         id: d.id,
         contactId: d.contact_id,
+        tenantId: d.tenant_id,
         eventType: d.event_type,
-        actor: d.actor,
+        actor: d.actor_name || d.actor || 'System',
+        actorId: d.actor_id,
+        actorName: d.actor_name,
         description: d.description,
         campaignName: d.campaign_name,
         metadata: d.metadata,
@@ -316,20 +422,27 @@ export class SupabaseDatabaseAdapter {
 
     create: async (campaignData) => {
       const client = this.getClient();
+
+      let createdBy = campaignData.createdBy;
+      if (!createdBy) {
+        const { data: member } = await client.from('tenant_members').select('user_id').eq('tenant_id', campaignData.tenantId).limit(1).maybeSingle();
+        createdBy = member?.user_id;
+      }
+
       const payload = {
         tenant_id: campaignData.tenantId,
         name: campaignData.name,
-        description: campaignData.description,
-        channel: campaignData.channel,
+        description: campaignData.description || 'Standard Campaign',
+        channel: campaignData.channel || 'WHATSAPP',
         status: campaignData.status || 'DRAFT',
-        target_list_id: campaignData.targetListId,
-        target_list_name: campaignData.targetListName,
-        template_id: campaignData.templateId,
-        template_version: campaignData.templateVersion,
-        template_snapshot: campaignData.templateSnapshot,
-        is_dry_run: campaignData.isDryRun,
-        assigned_operator: campaignData.assignedOperator,
-        created_by: campaignData.createdBy,
+        target_list_id: campaignData.targetListId || null,
+        target_list_name: campaignData.targetListName || 'Default Audience',
+        template_id: campaignData.templateId || null,
+        template_version: campaignData.templateVersion || 1,
+        template_snapshot: campaignData.templateSnapshot || { name: campaignData.name, body: '' },
+        is_dry_run: campaignData.isDryRun ?? false,
+        assigned_operator: campaignData.assignedOperator || createdBy,
+        created_by: createdBy,
         recipients_count: 0,
         sent_count: 0,
         opened_count: 0,
@@ -347,14 +460,27 @@ export class SupabaseDatabaseAdapter {
       return this.mapDbCampaignToDomain(data);
     },
 
-    update: async (id: string, updates: Partial<Campaign>, tenantId?: string) => {
+    update: async (id: string, updatesOrTenantId: any, tenantIdOrUpdates?: any) => {
+      let updates: Partial<Campaign>;
+      let tenantId: string | undefined;
+      if (typeof updatesOrTenantId === 'string') {
+        tenantId = updatesOrTenantId;
+        updates = tenantIdOrUpdates || {};
+      } else {
+        updates = updatesOrTenantId || {};
+        tenantId = tenantIdOrUpdates;
+      }
+
       const client = this.getClient();
       const dbUpdates: Record<string, any> = {
         updated_at: new Date().toISOString()
       };
 
       if (updates.status !== undefined) dbUpdates.status = updates.status;
-      if (updates.approvedBy !== undefined) dbUpdates.approved_by = updates.approvedBy;
+      if (updates.approvedBy !== undefined) {
+        const isUuid = typeof updates.approvedBy === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(updates.approvedBy);
+        dbUpdates.approved_by = isUuid ? updates.approvedBy : null;
+      }
       if (updates.approvedAt !== undefined) dbUpdates.approved_at = updates.approvedAt;
       if (updates.startedAt !== undefined) dbUpdates.started_at = updates.startedAt;
       if (updates.completedAt !== undefined) dbUpdates.completed_at = updates.completedAt;
@@ -372,16 +498,40 @@ export class SupabaseDatabaseAdapter {
       return this.mapDbCampaignToDomain(data);
     },
 
+    updateStatus: async (id: string, tenantId: string, status: any) => {
+      return this.campaignsRepo.update(id, { status }, tenantId);
+    },
+
     getRecipients: async (campaignId: string) => {
       const client = this.getClient();
-      const { data, error } = await client
-        .from('campaign_recipients')
-        .select('*')
-        .eq('campaign_id', campaignId)
-        .order('created_at', { ascending: true });
+      const allRows: any[] = [];
+      const PAGE_SIZE = 1000;
+      let from = 0;
+      let hasMore = true;
 
-      if (error) throw error;
-      return (data || []).map(this.mapDbRecipientToDomain);
+      while (hasMore) {
+        const { data, error } = await client
+          .from('campaign_recipients')
+          .select('*')
+          .eq('campaign_id', campaignId)
+          .order('created_at', { ascending: true })
+          .order('id', { ascending: true })
+          .range(from, from + PAGE_SIZE - 1);
+
+        if (error) throw error;
+        if (data && data.length > 0) {
+          allRows.push(...data);
+          if (data.length < PAGE_SIZE) {
+            hasMore = false;
+          } else {
+            from += PAGE_SIZE;
+          }
+        } else {
+          hasMore = false;
+        }
+      }
+
+      return allRows.map(row => this.mapDbRecipientToDomain(row));
     },
 
     getRecipientById: async (recipientId: string) => {
@@ -404,7 +554,10 @@ export class SupabaseDatabaseAdapter {
       };
 
       if (updates.status !== undefined) dbUpdates.status = updates.status;
-      if (updates.claimedByOperator !== undefined) dbUpdates.claimed_by_operator = updates.claimedByOperator;
+      if (updates.claimedByOperator !== undefined) {
+        const isUuid = typeof updates.claimedByOperator === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(updates.claimedByOperator);
+        dbUpdates.claimed_by_operator = isUuid ? updates.claimedByOperator : null;
+      }
       if (updates.claimedAt !== undefined) dbUpdates.claimed_at = updates.claimedAt;
       if (updates.openedAt !== undefined) dbUpdates.opened_at = updates.openedAt;
       if (updates.userSentAt !== undefined) dbUpdates.user_sent_at = updates.userSentAt;
@@ -421,12 +574,19 @@ export class SupabaseDatabaseAdapter {
 
       if (error) throw error;
 
-      // Recalculate campaign metrics in database
+      // Recalculate campaign metrics in database in parallel
       const campaignId = data.campaign_id;
-      const { count: sentCount } = await client.from('campaign_recipients').select('*', { count: 'exact', head: true }).eq('campaign_id', campaignId).eq('status', 'USER_SENT');
-      const { count: openedCount } = await client.from('campaign_recipients').select('*', { count: 'exact', head: true }).eq('campaign_id', campaignId).in('status', ['OPENED', 'USER_SENT']);
-      const { count: skippedCount } = await client.from('campaign_recipients').select('*', { count: 'exact', head: true }).eq('campaign_id', campaignId).eq('status', 'SKIPPED');
-      const { count: blockedCount } = await client.from('campaign_recipients').select('*', { count: 'exact', head: true }).eq('campaign_id', campaignId).in('status', ['BLOCKED', 'OPTED_OUT']);
+      const [
+        { count: sentCount },
+        { count: openedCount },
+        { count: skippedCount },
+        { count: blockedCount }
+      ] = await Promise.all([
+        client.from('campaign_recipients').select('*', { count: 'exact', head: true }).eq('campaign_id', campaignId).eq('status', 'USER_SENT'),
+        client.from('campaign_recipients').select('*', { count: 'exact', head: true }).eq('campaign_id', campaignId).in('status', ['OPENED', 'USER_SENT']),
+        client.from('campaign_recipients').select('*', { count: 'exact', head: true }).eq('campaign_id', campaignId).eq('status', 'SKIPPED'),
+        client.from('campaign_recipients').select('*', { count: 'exact', head: true }).eq('campaign_id', campaignId).in('status', ['BLOCKED', 'OPTED_OUT'])
+      ]);
 
       await client.from('campaigns').update({
         sent_count: sentCount || 0,
@@ -439,13 +599,32 @@ export class SupabaseDatabaseAdapter {
       return this.mapDbRecipientToDomain(data);
     },
 
-    addRecipients: async (recipientsData) => {
+    addRecipients: async (recipientsData: Array<Omit<CampaignRecipient, 'id' | 'createdAt'>>, tenantId?: string) => {
+      if (!recipientsData || recipientsData.length === 0) return 0;
       const client = this.getClient();
+
+      // Ensure tenant_id is always resolved
+      let resolvedTenantId = tenantId;
+      if (!resolvedTenantId && (recipientsData[0] as any)?.tenantId) {
+        resolvedTenantId = (recipientsData[0] as any).tenantId;
+      }
+      if (!resolvedTenantId && recipientsData[0]?.campaignId) {
+        const { data: camp } = await client
+          .from('campaigns')
+          .select('tenant_id')
+          .eq('id', recipientsData[0].campaignId)
+          .maybeSingle();
+        if (camp?.tenant_id) {
+          resolvedTenantId = camp.tenant_id;
+        }
+      }
+
       const insertRows = recipientsData.map(r => ({
+        tenant_id: (r as any).tenantId || resolvedTenantId,
         campaign_id: r.campaignId,
         contact_id: r.contactId,
         contact_name: r.contactName,
-        company_name: r.companyName,
+        company_name: r.companyName || '',
         channel: r.channel,
         channel_address: r.channelAddress,
         resolved_message: r.resolvedMessage,
@@ -454,13 +633,34 @@ export class SupabaseDatabaseAdapter {
         status: r.status || 'READY'
       }));
 
-      const { data, error } = await client
-        .from('campaign_recipients')
-        .insert(insertRows)
-        .select('id');
+      // Insert in chunks of 250 to ensure reliable delivery even with 1,800+ recipients
+      const CHUNK_SIZE = 250;
+      let insertedCount = 0;
+      for (let i = 0; i < insertRows.length; i += CHUNK_SIZE) {
+        const chunk = insertRows.slice(i, i + CHUNK_SIZE);
+        const { data, error } = await client
+          .from('campaign_recipients')
+          .insert(chunk)
+          .select('id');
 
+        if (error) throw error;
+        insertedCount += data ? data.length : chunk.length;
+      }
+
+      return insertedCount;
+    },
+
+    delete: async (id: string, tenantId?: string) => {
+      const client = this.getClient();
+      // Delete recipients first to be explicit across all FK setups
+      let recQuery = client.from('campaign_recipients').delete().eq('campaign_id', id);
+      if (tenantId) recQuery = recQuery.eq('tenant_id', tenantId);
+      await recQuery;
+
+      let campQuery = client.from('campaigns').delete().eq('id', id);
+      if (tenantId) campQuery = campQuery.eq('tenant_id', tenantId);
+      const { error } = await campQuery;
       if (error) throw error;
-      return data ? data.length : recipientsData.length;
     }
   };
 
@@ -492,19 +692,25 @@ export class SupabaseDatabaseAdapter {
 
     create: async (data) => {
       const client = this.getClient();
+      let createdBy = data.createdBy;
+      if (!createdBy || typeof createdBy !== 'string' || createdBy.includes(' ')) {
+        const { data: member } = await client.from('tenant_members').select('user_id').eq('tenant_id', data.tenantId).limit(1).maybeSingle();
+        createdBy = member?.user_id || '7f2b33ed-ef19-44fc-a04d-1f54051b07c4';
+      }
+
       const payload = {
         tenant_id: data.tenantId,
         name: data.name,
         channel: data.channel,
-        subject: data.subject,
+        subject: data.subject || '',
         body: data.body,
         version: 1,
-        available_variables: data.availableVariables,
-        attachment_name: data.attachmentName,
-        attachment_size: data.attachmentSize,
-        attachment_type: data.attachmentType,
+        available_variables: data.availableVariables || [],
+        attachment_name: data.attachmentName || null,
+        attachment_size: data.attachmentSize || null,
+        attachment_type: data.attachmentType || null,
         category: data.category || 'INTRODUCTION',
-        created_by: data.createdBy
+        created_by: createdBy
       };
 
       const { data: created, error } = await client
@@ -517,7 +723,17 @@ export class SupabaseDatabaseAdapter {
       return this.mapDbTemplateToDomain(created);
     },
 
-    update: async (id: string, updates: Partial<MessageTemplate>, tenantId?: string) => {
+    update: async (id: string, updatesOrTenantId: any, tenantIdOrUpdates?: any) => {
+      let updates: Partial<MessageTemplate>;
+      let tenantId: string | undefined;
+      if (typeof updatesOrTenantId === 'string') {
+        tenantId = updatesOrTenantId;
+        updates = tenantIdOrUpdates || {};
+      } else {
+        updates = updatesOrTenantId || {};
+        tenantId = tenantIdOrUpdates;
+      }
+
       const client = this.getClient();
       // Increment version on update
       const { data: existing, error: getErr } = await client.from('message_templates').select('version').eq('id', id).single();
@@ -554,7 +770,7 @@ export class SupabaseDatabaseAdapter {
   };
 
   // ============================================================================
-  // CONTACT LISTS REPOSITORY
+  // CONTACT LISTS REPOSITORY (Junction Table contact_list_members Normalized)
   // ============================================================================
   contactListsRepo: IContactListRepository = {
     findAll: async (tenantId: string) => {
@@ -566,7 +782,53 @@ export class SupabaseDatabaseAdapter {
         .order('created_at', { ascending: false });
 
       if (error) throw error;
-      return (data || []).map(this.mapDbListToDomain);
+      if (!data || data.length === 0) return [];
+
+      const listIds = data.map(l => l.id);
+
+      // Paginate contact_list_members retrieval to support large lists (1,800+ members)
+      const allMembers: any[] = [];
+      const PAGE_SIZE = 1000;
+      let from = 0;
+      let hasMore = true;
+
+      while (hasMore) {
+        const { data: members, error: memErr } = await client
+          .from('contact_list_members')
+          .select('list_id, contact_id')
+          .in('list_id', listIds)
+          .range(from, from + PAGE_SIZE - 1);
+
+        if (memErr) throw memErr;
+        if (members && members.length > 0) {
+          allMembers.push(...members);
+          if (members.length < PAGE_SIZE) {
+            hasMore = false;
+          } else {
+            from += PAGE_SIZE;
+          }
+        } else {
+          hasMore = false;
+        }
+      }
+
+      const memberMap = new Map<string, string[]>();
+      allMembers.forEach((m: any) => {
+        const arr = memberMap.get(m.list_id) || [];
+        arr.push(m.contact_id);
+        memberMap.set(m.list_id, arr);
+      });
+
+      return data.map(l => ({
+        id: l.id,
+        tenantId: l.tenant_id,
+        name: l.name,
+        description: l.description || '',
+        type: l.type,
+        rules: l.rules,
+        contactIds: memberMap.get(l.id) || [],
+        createdAt: l.created_at
+      }));
     },
 
     findById: async (id: string, tenantId?: string) => {
@@ -576,7 +838,42 @@ export class SupabaseDatabaseAdapter {
       const { data, error } = await query.maybeSingle();
       if (error) throw error;
       if (!data) return null;
-      return this.mapDbListToDomain(data);
+
+      const allMembers: any[] = [];
+      const PAGE_SIZE = 1000;
+      let from = 0;
+      let hasMore = true;
+
+      while (hasMore) {
+        const { data: members, error: memErr } = await client
+          .from('contact_list_members')
+          .select('contact_id')
+          .eq('list_id', id)
+          .range(from, from + PAGE_SIZE - 1);
+
+        if (memErr) throw memErr;
+        if (members && members.length > 0) {
+          allMembers.push(...members);
+          if (members.length < PAGE_SIZE) {
+            hasMore = false;
+          } else {
+            from += PAGE_SIZE;
+          }
+        } else {
+          hasMore = false;
+        }
+      }
+
+      return {
+        id: data.id,
+        tenantId: data.tenant_id,
+        name: data.name,
+        description: data.description || '',
+        type: data.type,
+        rules: data.rules,
+        contactIds: allMembers.map((m: any) => m.contact_id),
+        createdAt: data.created_at
+      };
     },
 
     create: async (data) => {
@@ -584,10 +881,9 @@ export class SupabaseDatabaseAdapter {
       const payload = {
         tenant_id: data.tenantId,
         name: data.name,
-        description: data.description,
+        description: data.description || '',
         type: data.type,
-        rules: data.rules,
-        contact_ids: data.contactIds || []
+        rules: data.rules
       };
 
       const { data: created, error } = await client
@@ -597,7 +893,30 @@ export class SupabaseDatabaseAdapter {
         .single();
 
       if (error) throw error;
-      return this.mapDbListToDomain(created);
+
+      if (data.contactIds && data.contactIds.length > 0) {
+        const memberRows = data.contactIds.map(cid => ({
+          tenant_id: data.tenantId,
+          list_id: created.id,
+          contact_id: cid
+        }));
+        const CHUNK_SIZE = 200;
+        for (let i = 0; i < memberRows.length; i += CHUNK_SIZE) {
+          const chunk = memberRows.slice(i, i + CHUNK_SIZE);
+          await client.from('contact_list_members').insert(chunk);
+        }
+      }
+
+      return {
+        id: created.id,
+        tenantId: created.tenant_id,
+        name: created.name,
+        description: created.description || '',
+        type: created.type,
+        rules: created.rules,
+        contactIds: data.contactIds || [],
+        createdAt: created.created_at
+      };
     },
 
     update: async (id: string, updates: Partial<ContactList>, tenantId?: string) => {
@@ -609,18 +928,45 @@ export class SupabaseDatabaseAdapter {
       if (updates.description !== undefined) dbUpdates.description = updates.description;
       if (updates.type !== undefined) dbUpdates.type = updates.type;
       if (updates.rules !== undefined) dbUpdates.rules = updates.rules;
-      if (updates.contactIds !== undefined) dbUpdates.contact_ids = updates.contactIds;
 
       let query = client.from('contact_lists').update(dbUpdates).eq('id', id);
       if (tenantId) query = query.eq('tenant_id', tenantId);
 
       const { data, error } = await query.select().single();
       if (error) throw error;
-      return this.mapDbListToDomain(data);
+
+      if (updates.contactIds !== undefined) {
+        await client.from('contact_list_members').delete().eq('list_id', id);
+        if (updates.contactIds.length > 0) {
+          const memberRows = updates.contactIds.map(cid => ({
+            tenant_id: data.tenant_id,
+            list_id: id,
+            contact_id: cid
+          }));
+          await client.from('contact_list_members').insert(memberRows);
+        }
+      }
+
+      const { data: members } = await client
+        .from('contact_list_members')
+        .select('contact_id')
+        .eq('list_id', id);
+
+      return {
+        id: data.id,
+        tenantId: data.tenant_id,
+        name: data.name,
+        description: data.description || '',
+        type: data.type,
+        rules: data.rules,
+        contactIds: (members || []).map((m: any) => m.contact_id),
+        createdAt: data.created_at
+      };
     },
 
     delete: async (id: string, tenantId?: string) => {
       const client = this.getClient();
+      await client.from('contact_list_members').delete().eq('list_id', id);
       let query = client.from('contact_lists').delete().eq('id', id);
       if (tenantId) query = query.eq('tenant_id', tenantId);
       const { error } = await query;
@@ -747,6 +1093,10 @@ export class SupabaseDatabaseAdapter {
       return this.mapDbTenantToDomain(data);
     },
 
+    toggleKillSwitch: async (id: string, isActive: boolean, reason?: string, by?: string) => {
+      return this.tenantRepo.updateKillSwitch(id, isActive, reason, by);
+    },
+
     getCurrentUser: async () => {
       throw new Error('getCurrentUser must be resolved through verified Supabase Auth context.');
     },
@@ -789,6 +1139,55 @@ export class SupabaseDatabaseAdapter {
       .eq('user_id', userId);
 
     if (memberErr || !memberRows || memberRows.length === 0) {
+      try {
+        const cleanSlug = (email.split('@')[0] || 'workspace').toLowerCase().replace(/[^a-z0-9]/g, '-').slice(0, 30);
+        const uniqueSlug = `${cleanSlug}-${userId.slice(0, 8)}`;
+        const tenantName = name ? `${name}'s Workspace` : 'Primary Workspace';
+
+        const { data: createdTenant } = await client
+          .from('tenants')
+          .insert({
+            name: tenantName,
+            slug: uniqueSlug,
+            status: 'ACTIVE'
+          })
+          .select()
+          .maybeSingle();
+
+        if (createdTenant) {
+          await client
+            .from('users')
+            .upsert({
+              id: userId,
+              email,
+              name: name || email.split('@')[0],
+              avatar_url: avatarUrl
+            }, { onConflict: 'id' });
+
+          await client
+            .from('tenant_members')
+            .insert({
+              tenant_id: createdTenant.id,
+              user_id: userId,
+              role: 'OWNER'
+            });
+
+          return {
+            user: { id: userId, email, name, role: 'OWNER', avatarUrl },
+            memberships: [{
+              id: crypto.randomUUID(),
+              tenantId: createdTenant.id,
+              userId,
+              role: 'OWNER',
+              createdAt: new Date().toISOString(),
+              tenant: this.mapDbTenantToDomain(createdTenant)
+            }]
+          };
+        }
+      } catch (autoErr) {
+        console.warn('[validateAuthToken] Auto-provision workspace notice:', autoErr);
+      }
+
       return {
         user: { id: userId, email, name, role: 'VIEWER', avatarUrl },
         memberships: []
@@ -887,6 +1286,7 @@ export class SupabaseDatabaseAdapter {
   private mapDbRecipientToDomain(row: any): CampaignRecipient {
     return {
       id: row.id,
+      tenantId: row.tenant_id,
       campaignId: row.campaign_id,
       contactId: row.contact_id,
       contactName: row.contact_name,
