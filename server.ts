@@ -1464,11 +1464,39 @@ api.get('/stats', async (req: AuthenticatedRequest, res: Response) => {
   }
 });
 
-// Mount versioned API
+// Mount versioned API routes (supporting /api/v1 as well as /v1 and /api)
 app.use('/api/v1', api);
+app.use('/v1', api);
+app.use('/api', api);
+
+// Direct health endpoint
+app.get('/health', (_req: Request, res: Response) => {
+  res.json({
+    status: db.isConfigured ? 'HEALTHY' : 'DATABASE_UNCONFIGURED',
+    version: '1.0.0',
+    timestamp: new Date().toISOString(),
+    database: 'SUPABASE_POSTGRESQL',
+    isDatabaseConfigured: db.isConfigured,
+    message: db.isConfigured
+      ? 'Connected to authoritative Supabase PostgreSQL database.'
+      : 'Supabase database credentials missing.'
+  });
+});
+
+// Detect serverless environment (Vercel, AWS Lambda, etc.)
+const isServerless = Boolean(
+  process.env.IS_SERVERLESS ||
+  process.env.VERCEL ||
+  process.env.VERCEL_ENV ||
+  process.env.VERCEL_REGION ||
+  process.env.AWS_LAMBDA_FUNCTION_NAME ||
+  process.env.LAMBDA_TASK_ROOT
+);
 
 // ================= VITE DEV / STATIC SERVING =================
 export async function startServer(port = PORT) {
+  if (isServerless) return;
+
   if (process.env.NODE_ENV !== 'production' && process.env.NODE_ENV !== 'test') {
     const { createServer: createViteServer } = await import('vite');
     const vite = await createViteServer({
@@ -1488,7 +1516,8 @@ export async function startServer(port = PORT) {
   });
 }
 
-if (process.env.NODE_ENV !== 'test' && !process.env.VERCEL) {
+// Only start the standalone HTTP listener when running as a direct process (e.g. `npm run dev`)
+if (process.env.NODE_ENV !== 'test' && !isServerless) {
   startServer().catch(err => {
     console.error('[ReachOut OS Server] Failed to start:', err);
   });
