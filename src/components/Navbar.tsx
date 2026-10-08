@@ -10,7 +10,8 @@ import {
   Database,
   LogOut,
   AlertTriangle,
-  BookOpen
+  BookOpen,
+  Sparkles
 } from 'lucide-react';
 import { Tenant, User, Role } from '../types';
 
@@ -24,6 +25,7 @@ interface NavbarProps {
   onOpenGuide: () => void;
   onToggleKillSwitch: () => void;
   onSignOut: () => void;
+  onOpenLanding?: () => void;
 }
 
 export const Navbar: React.FC<NavbarProps> = ({
@@ -35,7 +37,8 @@ export const Navbar: React.FC<NavbarProps> = ({
   onOpenShortcuts,
   onOpenGuide,
   onToggleKillSwitch,
-  onSignOut
+  onSignOut,
+  onOpenLanding
 }) => {
   return (
     <header className="h-14 border-b border-neutral-200 dark:border-neutral-800 bg-white/80 dark:bg-neutral-900/80 backdrop-blur-md px-4 flex items-center justify-between sticky top-0 z-30">
@@ -140,6 +143,18 @@ export const Navbar: React.FC<NavbarProps> = ({
               <LogOut className="w-3.5 h-3.5" />
             </button>
           </div>
+        )}
+
+        {/* Public Landing Page & Feature Showcase Button */}
+        {onOpenLanding && (
+          <button
+            onClick={onOpenLanding}
+            className="hidden sm:flex items-center gap-1.5 px-2.5 py-1.5 rounded-md bg-neutral-100 dark:bg-neutral-800 border border-neutral-200 dark:border-neutral-700 text-neutral-700 dark:text-neutral-300 hover:text-neutral-900 dark:hover:text-white hover:bg-neutral-200 dark:hover:bg-neutral-700 text-xs font-semibold shadow-xs transition cursor-pointer"
+            title="View Public Landing Page & Live Simulator"
+          >
+            <Sparkles className="w-3.5 h-3.5 text-emerald-500" />
+            <span>Landing Page</span>
+          </button>
         )}
 
         {/* Interactive App Guide Button */}

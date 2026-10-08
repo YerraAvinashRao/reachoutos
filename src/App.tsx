@@ -23,10 +23,24 @@ import { supabase } from './services/supabaseClient';
 import { Tenant, User, Contact, Campaign, MessageTemplate, ContactList, AuditLogEntry, TimelineEvent } from './types';
 import { Database, ShieldAlert, ExternalLink, Terminal, CheckCircle2, AlertCircle, RefreshCw } from 'lucide-react';
 import { ReachOut3DLoader } from './components/common/ReachOut3DLoader';
+import { LandingPageView } from './components/LandingPageView';
 
 export default function App() {
   const [darkMode, setDarkMode] = useState(true);
   const [activeTab, setActiveTab] = useState<NavTab>('dashboard');
+
+  // Public Landing Page view state (defaults to true for new visitors, false for authenticated sessions)
+  const [showLandingPage, setShowLandingPage] = useState<boolean>(() => {
+    try {
+      if (typeof window === 'undefined') return false;
+      const params = new URLSearchParams(window.location.search);
+      if (params.get('landing') === 'true' || window.location.hash === '#landing') return true;
+      const hasAuth = Object.keys(localStorage).some(k => k.startsWith('sb-') && k.endsWith('-auth-token'));
+      return !hasAuth;
+    } catch {
+      return false;
+    }
+  });
 
   // Supabase Database & Auth State
   const [isDatabaseConfigured, setIsDatabaseConfigured] = useState<boolean>(true);
@@ -326,6 +340,7 @@ export default function App() {
     try { localStorage.removeItem('reachout_workspace_cache'); } catch (_) {}
     await apiClient.logout();
     setIsAuthenticated(false);
+    setShowLandingPage(true);
     setUser(null);
     setTenant(null);
     setContacts([]);
@@ -410,6 +425,25 @@ export default function App() {
     }
   }, [selectedCampaignId, campaigns, lists, contacts]);
 
+  // Render stunning public landing page if active
+  if (showLandingPage) {
+    return (
+      <div className={darkMode ? 'dark font-sans' : 'font-sans'}>
+        <LandingPageView
+          onLaunchApp={() => {
+            setShowLandingPage(false);
+            if (!isAuthenticated) {
+              loadData();
+            }
+          }}
+          isAuthenticated={isAuthenticated}
+          onSignOut={handleSignOut}
+          userEmail={user?.email}
+        />
+      </div>
+    );
+  }
+
   return (
     <div className={darkMode ? 'dark font-sans' : 'font-sans'}>
       <div className="min-h-screen bg-neutral-100 dark:bg-neutral-950 text-neutral-900 dark:text-neutral-100 flex flex-col selection:bg-neutral-900 selection:text-white dark:selection:bg-white dark:selection:text-neutral-900">
@@ -424,6 +458,7 @@ export default function App() {
           onOpenGuide={() => setGuideModalOpen(true)}
           onToggleKillSwitch={() => handleToggleKillSwitch('Toggled via top navigation bar')}
           onSignOut={handleSignOut}
+          onOpenLanding={() => setShowLandingPage(true)}
         />
 
         {/* Upstream Proxy Rate-Limit Notice */}
@@ -622,6 +657,7 @@ export default function App() {
               activeCampaignsCount={campaigns.filter(c => c.status === 'ACTIVE').length}
               user={user}
               onOpenGuide={() => setGuideModalOpen(true)}
+              onOpenLanding={() => setShowLandingPage(true)}
             />
 
             {/* Main Workspace Stage */}

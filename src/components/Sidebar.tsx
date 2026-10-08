@@ -32,6 +32,7 @@ interface SidebarProps {
   activeCampaignsCount: number;
   user?: User | null;
   onOpenGuide?: () => void;
+  onOpenLanding?: () => void;
 }
 
 export const Sidebar: React.FC<SidebarProps> = ({
@@ -39,7 +40,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
   setActiveTab,
   activeCampaignsCount,
   user,
-  onOpenGuide
+  onOpenGuide,
+  onOpenLanding
 }) => {
   const navItems = [
     { id: 'dashboard' as NavTab, label: 'Dashboard', icon: LayoutDashboard },
@@ -128,6 +130,22 @@ export const Sidebar: React.FC<SidebarProps> = ({
           </div>
           <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-emerald-200/60 dark:bg-emerald-800 text-emerald-900 dark:text-emerald-100">
             Tour
+          </span>
+        </button>
+      )}
+
+      {/* Landing Page Showcase Button */}
+      {onOpenLanding && (
+        <button
+          onClick={onOpenLanding}
+          className="w-full mb-2 p-2.5 rounded-lg border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 hover:bg-neutral-50 dark:hover:bg-neutral-800 text-neutral-700 dark:text-neutral-300 text-xs font-semibold flex items-center justify-between transition cursor-pointer shadow-xs"
+        >
+          <div className="flex items-center gap-2">
+            <Sparkles className="w-4 h-4 text-emerald-500" />
+            <span>Public Landing Page</span>
+          </div>
+          <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-emerald-100 dark:bg-emerald-950/80 text-emerald-700 dark:text-emerald-400">
+            Showcase
           </span>
         </button>
       )}
