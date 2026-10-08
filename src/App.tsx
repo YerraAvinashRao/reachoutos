@@ -934,11 +934,12 @@ export default function App() {
                           }
                         } catch (_) {}
                       }
-                    } catch (err) {
+                    } catch (err: any) {
                       // Revert optimistic addition on failure
                       setCampaigns(prev => prev.filter(c => c.id !== tempId));
                       setSelectedCampaignId(null);
                       console.error('Failed to create campaign:', err);
+                      alert(err?.message || 'Failed to create campaign.');
                     }
                   }}
                   onDeleteCampaign={async (id: string) => {

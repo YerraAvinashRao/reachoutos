@@ -99,6 +99,35 @@ export class SupabaseDatabaseAdapter {
         }
       }
 
+      if (listMemberIds && listMemberIds.length > 0) {
+        // PostgREST URL length safety: chunk listMemberIds into batches of 150 to prevent URI length overflow (Bad Request)
+        const CHUNK_SIZE = 150;
+        const allRows: any[] = [];
+        for (let i = 0; i < listMemberIds.length; i += CHUNK_SIZE) {
+          const chunk = listMemberIds.slice(i, i + CHUNK_SIZE);
+          let query = client
+            .from('contacts')
+            .select('*')
+            .eq('tenant_id', tenantId)
+            .in('id', chunk);
+
+          if (search) {
+            query = query.or(`display_name.ilike.%${search}%,company_name.ilike.%${search}%,phone.ilike.%${search}%,email.ilike.%${search}%,city.ilike.%${search}%`);
+          }
+          if (tag) {
+            query = query.contains('tags', [tag]);
+          }
+          if (status) {
+            query = query.eq('status', status);
+          }
+
+          const { data, error } = await query;
+          if (error) throw error;
+          if (data) allRows.push(...data);
+        }
+        return allRows.map(row => this.mapDbContactToDomain(row));
+      }
+
       // Supabase / PostgREST limits single queries to 1,000 rows by default.
       // Auto-paginate in batches to retrieve all matching contacts without truncation.
       const allRows: any[] = [];
@@ -122,9 +151,6 @@ export class SupabaseDatabaseAdapter {
         }
         if (status) {
           query = query.eq('status', status);
-        }
-        if (listMemberIds && listMemberIds.length > 0) {
-          query = query.in('id', listMemberIds);
         }
 
         const { data, error } = await query;

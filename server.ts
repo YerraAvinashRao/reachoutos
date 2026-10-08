@@ -1087,15 +1087,19 @@ api.post(
         const { resolved } = DataQualityEngine.resolveTemplateVariables(template.body, contactData);
         const resolvedSub = template.subject ? DataQualityEngine.resolveTemplateVariables(template.subject, contactData).resolved : undefined;
 
+        const contactName = c.displayName || `${c.firstName || ''} ${c.lastName || ''}`.trim() || c.phone || 'Valued Contact';
+        const channelAddress = (campaign.channel === 'WHATSAPP' ? c.phone : c.email) || c.phone || c.email || '';
+        const resolvedMessage = resolved || template.body || '';
+
         recipientEntries.push({
           tenantId,
           campaignId: campaign.id,
           contactId: c.id,
-          contactName: c.displayName,
-          companyName: c.companyName,
+          contactName,
+          companyName: c.companyName || '',
           channel: campaign.channel,
-          channelAddress: campaign.channel === 'WHATSAPP' ? c.phone : c.email,
-          resolvedMessage: resolved,
+          channelAddress,
+          resolvedMessage,
           resolvedSubject: resolvedSub,
           attachmentName: template.attachmentName,
           status: 'READY'

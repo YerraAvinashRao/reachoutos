@@ -42,12 +42,39 @@ export const CampaignsView: React.FC<CampaignsViewProps> = ({
     isDryRun: false
   });
 
+  // Auto-sync initial select values when lists or templates load
+  React.useEffect(() => {
+    if (!formData.targetListId && lists.length > 0) {
+      setFormData(prev => ({ ...prev, targetListId: lists[0].id }));
+    }
+  }, [lists, formData.targetListId]);
+
+  React.useEffect(() => {
+    if (!formData.templateId && templates.length > 0) {
+      setFormData(prev => ({ ...prev, templateId: templates[0].id, channel: templates[0].channel || prev.channel }));
+    }
+  }, [templates, formData.templateId]);
+
   const handleCreateSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    const finalTargetListId = formData.targetListId || lists[0]?.id;
+    const finalTemplateId = formData.templateId || templates[0]?.id;
+
+    if (!finalTargetListId || !finalTemplateId) {
+      alert('Please select both an audience segment and a message template.');
+      return;
+    }
+
+    const payload = {
+      ...formData,
+      targetListId: finalTargetListId,
+      templateId: finalTemplateId
+    };
+
     setIsCreating(true);
     setShowCreateModal(false);
     try {
-      await onCreateCampaign(formData);
+      await onCreateCampaign(payload);
     } finally {
       setIsCreating(false);
     }

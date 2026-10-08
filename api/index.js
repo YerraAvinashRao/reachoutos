@@ -38,6 +38,27 @@ var SupabaseDatabaseAdapter = class {
             return [];
           }
         }
+        if (listMemberIds && listMemberIds.length > 0) {
+          const CHUNK_SIZE = 150;
+          const allRows2 = [];
+          for (let i = 0; i < listMemberIds.length; i += CHUNK_SIZE) {
+            const chunk = listMemberIds.slice(i, i + CHUNK_SIZE);
+            let query = client.from("contacts").select("*").eq("tenant_id", tenantId).in("id", chunk);
+            if (search) {
+              query = query.or(`display_name.ilike.%${search}%,company_name.ilike.%${search}%,phone.ilike.%${search}%,email.ilike.%${search}%,city.ilike.%${search}%`);
+            }
+            if (tag) {
+              query = query.contains("tags", [tag]);
+            }
+            if (status) {
+              query = query.eq("status", status);
+            }
+            const { data, error } = await query;
+            if (error) throw error;
+            if (data) allRows2.push(...data);
+          }
+          return allRows2.map((row) => this.mapDbContactToDomain(row));
+        }
         const allRows = [];
         const PAGE_SIZE = 1e3;
         let from = 0;
@@ -52,9 +73,6 @@ var SupabaseDatabaseAdapter = class {
           }
           if (status) {
             query = query.eq("status", status);
-          }
-          if (listMemberIds && listMemberIds.length > 0) {
-            query = query.in("id", listMemberIds);
           }
           const { data, error } = await query;
           if (error) throw error;
@@ -2629,15 +2647,18 @@ api.post(
         };
         const { resolved } = DataQualityEngine.resolveTemplateVariables(template.body, contactData);
         const resolvedSub = template.subject ? DataQualityEngine.resolveTemplateVariables(template.subject, contactData).resolved : void 0;
+        const contactName = c.displayName || `${c.firstName || ""} ${c.lastName || ""}`.trim() || c.phone || "Valued Contact";
+        const channelAddress = (campaign.channel === "WHATSAPP" ? c.phone : c.email) || c.phone || c.email || "";
+        const resolvedMessage = resolved || template.body || "";
         recipientEntries.push({
           tenantId,
           campaignId: campaign.id,
           contactId: c.id,
-          contactName: c.displayName,
-          companyName: c.companyName,
+          contactName,
+          companyName: c.companyName || "",
           channel: campaign.channel,
-          channelAddress: campaign.channel === "WHATSAPP" ? c.phone : c.email,
-          resolvedMessage: resolved,
+          channelAddress,
+          resolvedMessage,
           resolvedSubject: resolvedSub,
           attachmentName: template.attachmentName,
           status: "READY"
