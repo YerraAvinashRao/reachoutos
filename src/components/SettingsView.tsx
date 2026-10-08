@@ -205,6 +205,117 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
         )}
       </div>
 
+      {/* 1b. Meta WhatsApp Business Policy Engine Registry */}
+      <div className="p-5 rounded-xl border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 shadow-sm space-y-4">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-neutral-100 dark:border-neutral-800 pb-3">
+          <div className="space-y-0.5">
+            <div className="flex items-center gap-2 font-bold text-neutral-900 dark:text-neutral-100 text-sm">
+              <ShieldCheck className="w-4 h-4 text-emerald-600" />
+              <span>Meta WhatsApp Business Policy Engine</span>
+              <span className="px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-400">
+                ACTIVE v2026-10
+              </span>
+            </div>
+            <p className="text-[11px] text-neutral-500">
+              Authoritative, data-driven compliance engine based on official Meta WhatsApp Business Policies and Guidelines.
+            </p>
+          </div>
+          <a
+            href="https://business.whatsapp.com/policy"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-[11px] font-medium text-emerald-700 dark:text-emerald-400 hover:underline flex items-center gap-1 self-start sm:self-auto"
+          >
+            <span>Official Meta Policy Reference ↗</span>
+          </a>
+        </div>
+
+        {/* Policy Metadata Breakdown */}
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
+          <div className="p-2.5 rounded-lg border border-neutral-200 dark:border-neutral-800 bg-neutral-50/60 dark:bg-neutral-800/40">
+            <div className="text-[10px] text-neutral-400 uppercase font-mono">Authority</div>
+            <div className="font-semibold text-neutral-800 dark:text-neutral-200 mt-0.5">Meta Platforms, Inc.</div>
+          </div>
+          <div className="p-2.5 rounded-lg border border-neutral-200 dark:border-neutral-800 bg-neutral-50/60 dark:bg-neutral-800/40">
+            <div className="text-[10px] text-neutral-400 uppercase font-mono">Version Cycle</div>
+            <div className="font-semibold text-neutral-800 dark:text-neutral-200 mt-0.5">2026-10 (Monthly)</div>
+          </div>
+          <div className="p-2.5 rounded-lg border border-neutral-200 dark:border-neutral-800 bg-neutral-50/60 dark:bg-neutral-800/40">
+            <div className="text-[10px] text-neutral-400 uppercase font-mono">Enforcement Mode</div>
+            <div className="font-semibold text-emerald-600 dark:text-emerald-400 mt-0.5">Strict / Fail-Closed</div>
+          </div>
+          <div className="p-2.5 rounded-lg border border-neutral-200 dark:border-neutral-800 bg-neutral-50/60 dark:bg-neutral-800/40">
+            <div className="text-[10px] text-neutral-400 uppercase font-mono">Decision Hierarchy</div>
+            <div className="font-semibold text-neutral-800 dark:text-neutral-200 mt-0.5">AI Proposes → Engine Decides</div>
+          </div>
+        </div>
+
+        {/* 8 Mandatory Policy Domains Grid */}
+        <div className="space-y-1.5 pt-1">
+          <div className="text-[11px] font-semibold text-neutral-600 dark:text-neutral-400">
+            Active Compliance Domain Gates
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-[11px]">
+            <div className="p-2.5 rounded-lg border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 flex items-start gap-2">
+              <span className="text-emerald-600 font-bold">01</span>
+              <div>
+                <div className="font-semibold text-neutral-800 dark:text-neutral-200">Consent & Documented Opt-In</div>
+                <div className="text-[10px] text-neutral-500 font-mono">WA-CONSENT-001 • Category & channel match</div>
+              </div>
+            </div>
+            <div className="p-2.5 rounded-lg border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 flex items-start gap-2">
+              <span className="text-emerald-600 font-bold">02</span>
+              <div>
+                <div className="font-semibold text-neutral-800 dark:text-neutral-200">Opt-Out & Instant Suppression</div>
+                <div className="text-[10px] text-neutral-500 font-mono">WA-OPTOUT-001 • Hard block override</div>
+              </div>
+            </div>
+            <div className="p-2.5 rounded-lg border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 flex items-start gap-2">
+              <span className="text-emerald-600 font-bold">03</span>
+              <div>
+                <div className="font-semibold text-neutral-800 dark:text-neutral-200">24-Hour Customer Service Window</div>
+                <div className="text-[10px] text-neutral-500 font-mono">WA-WINDOW-001 • Freeform vs Approved Template</div>
+              </div>
+            </div>
+            <div className="p-2.5 rounded-lg border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 flex items-start gap-2">
+              <span className="text-emerald-600 font-bold">04</span>
+              <div>
+                <div className="font-semibold text-neutral-800 dark:text-neutral-200">Template Category Integrity</div>
+                <div className="text-[10px] text-neutral-500 font-mono">WA-TEMPLATE-002 • Anti-repurposing check</div>
+              </div>
+            </div>
+            <div className="p-2.5 rounded-lg border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 flex items-start gap-2">
+              <span className="text-emerald-600 font-bold">05</span>
+              <div>
+                <div className="font-semibold text-neutral-800 dark:text-neutral-200">Content & Deception Defense</div>
+                <div className="text-[10px] text-neutral-500 font-mono">WA-CONTENT-001 • Spam, fraud & claims classifier</div>
+              </div>
+            </div>
+            <div className="p-2.5 rounded-lg border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 flex items-start gap-2">
+              <span className="text-emerald-600 font-bold">06</span>
+              <div>
+                <div className="font-semibold text-neutral-800 dark:text-neutral-200">Prohibited Goods & Meta Commerce</div>
+                <div className="text-[10px] text-neutral-500 font-mono">WA-PROHIBITED-001 • Tobacco, alcohol & weapons block</div>
+              </div>
+            </div>
+            <div className="p-2.5 rounded-lg border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 flex items-start gap-2">
+              <span className="text-emerald-600 font-bold">07</span>
+              <div>
+                <div className="font-semibold text-neutral-800 dark:text-neutral-200">Data Protection & PII Safeguard</div>
+                <div className="text-[10px] text-neutral-500 font-mono">WA-DATA-001 • Card numbers, CVV & IDs stripped</div>
+              </div>
+            </div>
+            <div className="p-2.5 rounded-lg border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 flex items-start gap-2">
+              <span className="text-emerald-600 font-bold">08</span>
+              <div>
+                <div className="font-semibold text-neutral-800 dark:text-neutral-200">Quality Tiers & Anti-Spam Limits</div>
+                <div className="text-[10px] text-neutral-500 font-mono">WA-QUALITY-001 • Rate limits & tier protection</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
       {/* 2. Infrastructure & Database Portability Matrix */}
       <div className="p-5 rounded-xl border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 shadow-sm space-y-3">
         <div className="flex items-center gap-2 font-bold text-neutral-900 dark:text-neutral-100 text-sm">
