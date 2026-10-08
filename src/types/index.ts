@@ -239,7 +239,7 @@ export interface AuditLogEntry {
   actorName: string;
   actorRole: Role;
   action: string;
-  entityType: 'CONTACT' | 'CAMPAIGN' | 'TEMPLATE' | 'POLICY' | 'WORKSPACE' | 'IMPORT';
+  entityType: 'CONTACT' | 'CAMPAIGN' | 'TEMPLATE' | 'POLICY' | 'WORKSPACE' | 'IMPORT' | 'ADMIN';
   entityId: string;
   metadata: Record<string, any>;
   ipAddress: string;
@@ -247,3 +247,67 @@ export interface AuditLogEntry {
   entryHash?: string;
   createdAt: string;
 }
+
+export interface TenantMemberDetail {
+  id: string;
+  userId: string;
+  name: string;
+  email: string;
+  role: Role;
+  avatarUrl?: string;
+  joinedAt: string;
+  status: 'ACTIVE' | 'SUSPENDED';
+}
+
+export interface ComplianceReviewItem {
+  id: string;
+  tenantId: string;
+  createdAt: string;
+  action: string;
+  actorName: string;
+  actorRole: string;
+  entityId: string;
+  decision: 'HUMAN_REVIEW' | 'BLOCK' | 'ALLOW';
+  riskLevel: 'LOW' | 'MEDIUM' | 'HIGH';
+  violations: Array<{ ruleId: string; reason: string }>;
+  contactPhone?: string;
+  metadata: any;
+  isOverridden?: boolean;
+  overrideReason?: string;
+}
+
+export interface GlobalBlockItem {
+  id: string;
+  displayName: string;
+  phone: string;
+  email?: string;
+  companyName?: string;
+  isGloballyBlocked: boolean;
+  blockedReason?: string;
+  updatedAt: string;
+  status: string;
+}
+
+export interface SystemHealthStats {
+  status: 'HEALTHY' | 'DEGRADED' | 'DOWN';
+  dbLatencyMs: number;
+  policyEngineVersion: string;
+  tableCounts: {
+    contacts: number;
+    campaigns: number;
+    recipients: number;
+    auditLogs: number;
+    lists: number;
+    templates: number;
+    members: number;
+  };
+  killSwitch: {
+    isActive: boolean;
+    reason?: string;
+    triggeredAt?: string;
+    triggeredBy?: string;
+  };
+  serverUptimeSeconds: number;
+  timestamp: string;
+}
+

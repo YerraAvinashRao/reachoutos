@@ -24,6 +24,7 @@ export type NavTab =
   | 'campaigns'
   | 'ai'
   | 'audit'
+  | 'admin'
   | 'settings';
 
 interface SidebarProps {
@@ -43,6 +44,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
   onOpenGuide,
   onOpenLanding
 }) => {
+  const isAdminOrOwner = user?.role === 'OWNER' || user?.role === 'ADMIN' || user?.role === 'MANAGER';
+
   const navItems = [
     { id: 'dashboard' as NavTab, label: 'Dashboard', icon: LayoutDashboard },
     { id: 'contacts' as NavTab, label: 'Contacts', icon: Users },
@@ -57,6 +60,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
     },
     { id: 'ai' as NavTab, label: 'AI Copilot', icon: Sparkles },
     { id: 'audit' as NavTab, label: 'Audit Log', icon: History },
+    ...(isAdminOrOwner ? [{ id: 'admin' as NavTab, label: 'Admin Console', icon: ShieldCheck, badge: 'PRO' }] : []),
     { id: 'settings' as NavTab, label: 'Settings & Security', icon: Settings }
   ];
 

@@ -63,3 +63,17 @@ export interface ITenantRepository {
   getCurrentUser(): Promise<User>;
   switchUserRole?(role: Role): Promise<User>;
 }
+
+export interface IAdminRepository {
+  listMembers(tenantId: string): Promise<any[]>;
+  updateMemberRole(tenantId: string, memberId: string, newRole: Role, actor: User): Promise<any>;
+  removeMember(tenantId: string, memberId: string, actor: User): Promise<void>;
+  inviteMember(tenantId: string, email: string, name: string, role: Role, actor: User): Promise<any>;
+  getComplianceReviews(tenantId: string, limit?: number): Promise<any[]>;
+  resolveComplianceReview(tenantId: string, reviewId: string, decision: 'ALLOW' | 'BLOCK', reason: string, actor: User): Promise<any>;
+  getGlobalBlocklist(tenantId: string): Promise<any[]>;
+  addGlobalBlock(tenantId: string, identifier: string, reason: string, actor: User): Promise<any>;
+  removeGlobalBlock(tenantId: string, contactId: string, actor: User): Promise<void>;
+  getSystemHealth(tenantId: string): Promise<any>;
+}
+

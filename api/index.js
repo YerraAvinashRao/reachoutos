@@ -829,6 +829,380 @@ var SupabaseDatabaseAdapter = class {
         throw new Error("Role modification must be performed through verified database migrations or tenant_members updates.");
       }
     };
+    // ============================================================================
+    // ADMIN REPOSITORY (100% Authoritative PostgreSQL Multi-Tenant Administration)
+    // ============================================================================
+    this.adminRepo = {
+      listMembers: async (tenantId) => {
+        const client = this.getClient();
+        const { data: members, error: memErr } = await client.from("tenant_members").select("id, user_id, role, created_at").eq("tenant_id", tenantId).order("created_at", { ascending: true });
+        if (memErr) throw memErr;
+        if (!members || members.length === 0) return [];
+        const userIds = members.map((m) => m.user_id);
+        const { data: users, error: userErr } = await client.from("users").select("id, name, email, avatar_url").in("id", userIds);
+        if (userErr) throw userErr;
+        const userMap = new Map((users || []).map((u) => [u.id, u]));
+        return members.map((m) => {
+          const u = userMap.get(m.user_id);
+          return {
+            id: m.id,
+            userId: m.user_id,
+            name: u?.name || "Workspace Member",
+            email: u?.email || "unlinked@reachoutos.internal",
+            role: m.role,
+            avatarUrl: u?.avatar_url,
+            joinedAt: m.created_at,
+            status: "ACTIVE"
+          };
+        });
+      },
+      updateMemberRole: async (tenantId, memberId, newRole, actor) => {
+        const client = this.getClient();
+        const { data: member, error: findErr } = await client.from("tenant_members").select("*").eq("id", memberId).eq("tenant_id", tenantId).single();
+        if (findErr || !member) throw new Error("Tenant member not found");
+        if (member.role === "OWNER" && newRole !== "OWNER") {
+          const { count, error: countErr } = await client.from("tenant_members").select("id", { count: "exact", head: true }).eq("tenant_id", tenantId).eq("role", "OWNER");
+          if (countErr) throw countErr;
+          if ((count || 0) <= 1) {
+            throw new Error("Cannot change role: Workspace must have at least one OWNER.");
+          }
+        }
+        const { data: updated, error: updateErr } = await client.from("tenant_members").update({ role: newRole, updated_at: (/* @__PURE__ */ new Date()).toISOString() }).eq("id", memberId).eq("tenant_id", tenantId).select().single();
+        if (updateErr) throw updateErr;
+        await this.auditRepo.log({
+          tenantId,
+          actorId: actor.id,
+          actorName: actor.name,
+          actorRole: actor.role,
+          action: "ADMIN_MEMBER_ROLE_UPDATED",
+          entityType: "ADMIN",
+          entityId: memberId,
+          metadata: {
+            targetUserId: member.user_id,
+            previousRole: member.role,
+            newRole,
+            updatedBy: actor.name
+          },
+          ipAddress: "127.0.0.1"
+        });
+        return updated;
+      },
+      removeMember: async (tenantId, memberId, actor) => {
+        const client = this.getClient();
+        const { data: member, error: findErr } = await client.from("tenant_members").select("*").eq("id", memberId).eq("tenant_id", tenantId).single();
+        if (findErr || !member) throw new Error("Tenant member not found");
+        if (member.role === "OWNER") {
+          const { count, error: countErr } = await client.from("tenant_members").select("id", { count: "exact", head: true }).eq("tenant_id", tenantId).eq("role", "OWNER");
+          if (countErr) throw countErr;
+          if ((count || 0) <= 1) {
+            throw new Error("Cannot remove member: Workspace must have at least one OWNER.");
+          }
+        }
+        const { error: delErr } = await client.from("tenant_members").delete().eq("id", memberId).eq("tenant_id", tenantId);
+        if (delErr) throw delErr;
+        await this.auditRepo.log({
+          tenantId,
+          actorId: actor.id,
+          actorName: actor.name,
+          actorRole: actor.role,
+          action: "ADMIN_MEMBER_REMOVED",
+          entityType: "ADMIN",
+          entityId: memberId,
+          metadata: {
+            targetUserId: member.user_id,
+            role: member.role,
+            removedBy: actor.name
+          },
+          ipAddress: "127.0.0.1"
+        });
+      },
+      inviteMember: async (tenantId, email, name, role, actor) => {
+        const client = this.getClient();
+        const cleanEmail = email.trim().toLowerCase();
+        const cleanName = name.trim();
+        let { data: existingUser } = await client.from("users").select("id").eq("email", cleanEmail).maybeSingle();
+        let targetUserId = existingUser?.id;
+        if (!targetUserId) {
+          const newUserId = crypto.randomUUID();
+          const { data: newUser, error: createErr } = await client.from("users").insert({
+            id: newUserId,
+            email: cleanEmail,
+            name: cleanName
+          }).select("id").single();
+          if (createErr) throw createErr;
+          targetUserId = newUser.id;
+        }
+        const { data: existingMem } = await client.from("tenant_members").select("id").eq("tenant_id", tenantId).eq("user_id", targetUserId).maybeSingle();
+        if (existingMem) {
+          throw new Error("This user is already a member of this workspace.");
+        }
+        const { data: newMember, error: memErr } = await client.from("tenant_members").insert({
+          tenant_id: tenantId,
+          user_id: targetUserId,
+          role
+        }).select().single();
+        if (memErr) throw memErr;
+        await this.auditRepo.log({
+          tenantId,
+          actorId: actor.id,
+          actorName: actor.name,
+          actorRole: actor.role,
+          action: "ADMIN_MEMBER_INVITED",
+          entityType: "ADMIN",
+          entityId: newMember.id,
+          metadata: {
+            email: cleanEmail,
+            name: cleanName,
+            role,
+            invitedBy: actor.name
+          },
+          ipAddress: "127.0.0.1"
+        });
+        return newMember;
+      },
+      getComplianceReviews: async (tenantId, limit = 50) => {
+        const client = this.getClient();
+        const { data, error } = await client.from("compliance_evaluations").select("*").eq("tenant_id", tenantId).order("created_at", { ascending: false }).limit(limit);
+        if (!error && data && data.length > 0) {
+          return data.map((d) => ({
+            id: d.id,
+            tenantId: d.tenant_id,
+            createdAt: d.created_at,
+            action: `COMPLIANCE_${d.decision}`,
+            actorName: d.actor_id ? "Workspace Operator" : "Policy Engine",
+            actorRole: "OPERATOR",
+            entityId: d.recipient_id || d.campaign_id || d.id,
+            decision: d.decision,
+            riskLevel: d.risk_level,
+            violations: Array.isArray(d.violations) ? d.violations : [],
+            contactPhone: d.channel,
+            metadata: {
+              policyVersion: d.policy_version,
+              canHumanOverride: d.can_human_override,
+              requiredActions: d.required_actions
+            },
+            isOverridden: d.is_overridden,
+            overrideReason: d.override_reason
+          }));
+        }
+        const { data: auditLogs, error: auditErr } = await client.from("audit_logs").select("*").eq("tenant_id", tenantId).or("action.ilike.%COMPLIANCE%,action.ilike.%POLICY%").order("created_at", { ascending: false }).limit(limit);
+        if (auditErr) throw auditErr;
+        return (auditLogs || []).map((l) => {
+          const meta = l.metadata || {};
+          return {
+            id: l.id,
+            tenantId: l.tenant_id,
+            createdAt: l.created_at,
+            action: l.action,
+            actorName: l.actor_name,
+            actorRole: l.actor_role,
+            entityId: l.entity_id,
+            decision: meta.decision || (l.action.includes("ALLOW") ? "ALLOW" : l.action.includes("REVIEW") ? "HUMAN_REVIEW" : "BLOCK"),
+            riskLevel: meta.riskLevel || "MEDIUM",
+            violations: meta.violations || [],
+            contactPhone: meta.contactPhone,
+            metadata: meta,
+            isOverridden: meta.isOverride || false,
+            overrideReason: meta.overrideReason
+          };
+        });
+      },
+      resolveComplianceReview: async (tenantId, reviewId, decision, reason, actor) => {
+        const client = this.getClient();
+        try {
+          await client.from("compliance_evaluations").update({
+            is_overridden: true,
+            override_reason: reason,
+            overridden_by: actor.id,
+            decision
+          }).eq("id", reviewId).eq("tenant_id", tenantId);
+        } catch (e) {
+        }
+        await this.auditRepo.log({
+          tenantId,
+          actorId: actor.id,
+          actorName: actor.name,
+          actorRole: actor.role,
+          action: `COMPLIANCE_REVIEW_RESOLVED_${decision}`,
+          entityType: "POLICY",
+          entityId: reviewId,
+          metadata: {
+            reviewId,
+            resolutionDecision: decision,
+            reason,
+            resolvedBy: actor.name,
+            resolvedByRole: actor.role,
+            timestamp: (/* @__PURE__ */ new Date()).toISOString()
+          },
+          ipAddress: "127.0.0.1"
+        });
+        return { success: true, reviewId, decision, reason, resolvedBy: actor.name };
+      },
+      getGlobalBlocklist: async (tenantId) => {
+        const client = this.getClient();
+        const { data, error } = await client.from("contacts").select("id, display_name, phone, email, company_name, is_globally_blocked, blocked_reason, updated_at, status").eq("tenant_id", tenantId).or("is_globally_blocked.eq.true,status.eq.BLOCKED").order("updated_at", { ascending: false });
+        if (error) throw error;
+        return (data || []).map((c) => ({
+          id: c.id,
+          displayName: c.display_name || "Suppressed Contact",
+          phone: c.phone,
+          email: c.email,
+          companyName: c.company_name,
+          isGloballyBlocked: Boolean(c.is_globally_blocked),
+          blockedReason: c.blocked_reason || "Suppressed by policy/operator",
+          updatedAt: c.updated_at,
+          status: c.status
+        }));
+      },
+      addGlobalBlock: async (tenantId, identifier, reason, actor) => {
+        const client = this.getClient();
+        const trimmed = identifier.trim();
+        const isPhone = /^\+?[0-9\s\-()]{7,20}$/.test(trimmed);
+        let targetContactId = "";
+        if (isPhone) {
+          const cleanPhone = trimmed.replace(/[^\d+]/g, "");
+          const { data: existing } = await client.from("contacts").select("id").eq("tenant_id", tenantId).ilike("phone", `%${cleanPhone.slice(-10)}%`).maybeSingle();
+          if (existing) {
+            targetContactId = existing.id;
+            await client.from("contacts").update({
+              is_globally_blocked: true,
+              blocked_reason: reason,
+              status: "BLOCKED",
+              updated_at: (/* @__PURE__ */ new Date()).toISOString()
+            }).eq("id", existing.id);
+          } else {
+            const { data: created, error } = await client.from("contacts").insert({
+              tenant_id: tenantId,
+              display_name: `Suppressed (${cleanPhone})`,
+              first_name: "Suppressed",
+              last_name: "Recipient",
+              phone: cleanPhone.startsWith("+") ? cleanPhone : `+91${cleanPhone}`,
+              status: "BLOCKED",
+              is_globally_blocked: true,
+              blocked_reason: reason,
+              source: "ADMIN_BLOCKLIST",
+              channel_addresses: [{ id: `addr-${Date.now()}`, channelType: "WHATSAPP", address: cleanPhone, isPrimary: true, isVerified: false }],
+              preferences: { WHATSAPP: { channel: "WHATSAPP", marketingAllowed: false, transactionalAllowed: false } },
+              tags: ["SUPPRESSED", "GLOBAL_BLOCK"]
+            }).select("id").single();
+            if (error) throw error;
+            targetContactId = created.id;
+          }
+        } else {
+          const { data: existing } = await client.from("contacts").select("id").eq("tenant_id", tenantId).eq("email", trimmed.toLowerCase()).maybeSingle();
+          if (existing) {
+            targetContactId = existing.id;
+            await client.from("contacts").update({
+              is_globally_blocked: true,
+              blocked_reason: reason,
+              status: "BLOCKED",
+              updated_at: (/* @__PURE__ */ new Date()).toISOString()
+            }).eq("id", existing.id);
+          }
+        }
+        if (targetContactId) {
+          await client.from("campaign_recipients").update({
+            status: "BLOCKED",
+            policy_notes: `Globally blocked by Admin: ${reason}`,
+            updated_at: (/* @__PURE__ */ new Date()).toISOString()
+          }).eq("contact_id", targetContactId).neq("status", "USER_SENT");
+        }
+        await this.auditRepo.log({
+          tenantId,
+          actorId: actor.id,
+          actorName: actor.name,
+          actorRole: actor.role,
+          action: "ADMIN_GLOBAL_BLOCK_ADDED",
+          entityType: "CONTACT",
+          entityId: targetContactId || trimmed,
+          metadata: {
+            identifier: trimmed,
+            reason,
+            blockedBy: actor.name
+          },
+          ipAddress: "127.0.0.1"
+        });
+        return { success: true, identifier, reason };
+      },
+      removeGlobalBlock: async (tenantId, contactId, actor) => {
+        const client = this.getClient();
+        const { data: contact, error: findErr } = await client.from("contacts").select("*").eq("id", contactId).eq("tenant_id", tenantId).single();
+        if (findErr || !contact) throw new Error("Contact not found");
+        await client.from("contacts").update({
+          is_globally_blocked: false,
+          blocked_reason: null,
+          status: "ACTIVE",
+          updated_at: (/* @__PURE__ */ new Date()).toISOString()
+        }).eq("id", contactId).eq("tenant_id", tenantId);
+        await client.from("campaign_recipients").update({
+          status: "READY",
+          policy_notes: null,
+          updated_at: (/* @__PURE__ */ new Date()).toISOString()
+        }).eq("contact_id", contactId).eq("status", "BLOCKED");
+        await this.auditRepo.log({
+          tenantId,
+          actorId: actor.id,
+          actorName: actor.name,
+          actorRole: actor.role,
+          action: "ADMIN_GLOBAL_BLOCK_REMOVED",
+          entityType: "CONTACT",
+          entityId: contactId,
+          metadata: {
+            phone: contact.phone,
+            name: contact.display_name,
+            unblockedBy: actor.name
+          },
+          ipAddress: "127.0.0.1"
+        });
+      },
+      getSystemHealth: async (tenantId) => {
+        const client = this.getClient();
+        const startTime = Date.now();
+        const [
+          tenantRes,
+          contactsRes,
+          campaignsRes,
+          recipientsRes,
+          auditRes,
+          listsRes,
+          templatesRes,
+          membersRes
+        ] = await Promise.all([
+          client.from("tenants").select("is_kill_switch_active, kill_switch_reason, kill_switch_triggered_at, kill_switch_triggered_by").eq("id", tenantId).single(),
+          client.from("contacts").select("id", { count: "exact", head: true }).eq("tenant_id", tenantId),
+          client.from("campaigns").select("id", { count: "exact", head: true }).eq("tenant_id", tenantId),
+          client.from("campaign_recipients").select("id", { count: "exact", head: true }).eq("tenant_id", tenantId),
+          client.from("audit_logs").select("id", { count: "exact", head: true }).eq("tenant_id", tenantId),
+          client.from("contact_lists").select("id", { count: "exact", head: true }).eq("tenant_id", tenantId),
+          client.from("message_templates").select("id", { count: "exact", head: true }).eq("tenant_id", tenantId),
+          client.from("tenant_members").select("id", { count: "exact", head: true }).eq("tenant_id", tenantId)
+        ]);
+        const dbLatencyMs = Date.now() - startTime;
+        const tenantData = tenantRes.data || {};
+        return {
+          status: dbLatencyMs < 500 ? "HEALTHY" : "DEGRADED",
+          dbLatencyMs,
+          policyEngineVersion: "2026-10 (Meta Authoritative)",
+          tableCounts: {
+            contacts: contactsRes.count || 0,
+            campaigns: campaignsRes.count || 0,
+            recipients: recipientsRes.count || 0,
+            auditLogs: auditRes.count || 0,
+            lists: listsRes.count || 0,
+            templates: templatesRes.count || 0,
+            members: membersRes.count || 0
+          },
+          killSwitch: {
+            isActive: Boolean(tenantData.is_kill_switch_active),
+            reason: tenantData.kill_switch_reason,
+            triggeredAt: tenantData.kill_switch_triggered_at,
+            triggeredBy: tenantData.kill_switch_triggered_by
+          },
+          serverUptimeSeconds: Math.floor(process.uptime()),
+          timestamp: (/* @__PURE__ */ new Date()).toISOString()
+        };
+      }
+    };
     const defaultUrl = "https://cxzynykcdxadhhkjsmgs.supabase.co";
     const defaultKey = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImN4enlueWtjZHhhZGhoa2pzbWdzIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTEyNjU3ODQsImV4cCI6MjEwNjg0MTc4NH0.agjrQeFqscfKF5aN9rUkl4sgL1J_mjU7il3sL6olTjI";
     const rawUrl = config?.url || process.env.SUPABASE_URL || defaultUrl;
@@ -4422,6 +4796,105 @@ api.get("/stats", async (req, res) => {
         isKillSwitchActive: tenant?.isKillSwitchActive || false
       }
     });
+  } catch (err) {
+    handleDatabaseError(err, res);
+  }
+});
+api.get("/admin/members", requireRole(["OWNER", "ADMIN", "MANAGER"]), async (req, res) => {
+  try {
+    const members = await db.adminRepo.listMembers(req.auth.tenant.id);
+    res.json({ data: members });
+  } catch (err) {
+    handleDatabaseError(err, res);
+  }
+});
+api.put("/admin/members/:id/role", requireRole(["OWNER", "ADMIN"]), async (req, res) => {
+  try {
+    const { role } = req.body;
+    if (!["OWNER", "ADMIN", "MANAGER", "OPERATOR", "VIEWER"].includes(role)) {
+      return res.status(400).json({ error: { message: "Invalid role specified." } });
+    }
+    const updated = await db.adminRepo.updateMemberRole(req.auth.tenant.id, req.params.id, role, req.auth.user);
+    res.json({ data: updated });
+  } catch (err) {
+    res.status(400).json({ error: { message: err?.message || "Failed to update member role" } });
+  }
+});
+api.delete("/admin/members/:id", requireRole(["OWNER", "ADMIN"]), async (req, res) => {
+  try {
+    await db.adminRepo.removeMember(req.auth.tenant.id, req.params.id, req.auth.user);
+    res.json({ data: { success: true } });
+  } catch (err) {
+    res.status(400).json({ error: { message: err?.message || "Failed to remove member" } });
+  }
+});
+api.post("/admin/members/invite", requireRole(["OWNER", "ADMIN"]), async (req, res) => {
+  try {
+    const { email, name, role } = req.body;
+    if (!email || !name || !role) {
+      return res.status(400).json({ error: { message: "Email, name, and role are required." } });
+    }
+    const newMember = await db.adminRepo.inviteMember(req.auth.tenant.id, email, name, role, req.auth.user);
+    res.json({ data: newMember });
+  } catch (err) {
+    res.status(400).json({ error: { message: err?.message || "Failed to invite member" } });
+  }
+});
+api.get("/admin/compliance/reviews", requireRole(["OWNER", "ADMIN", "MANAGER"]), async (req, res) => {
+  try {
+    const reviews = await db.adminRepo.getComplianceReviews(req.auth.tenant.id);
+    res.json({ data: reviews });
+  } catch (err) {
+    handleDatabaseError(err, res);
+  }
+});
+api.post("/admin/compliance/reviews/:id/resolve", requireRole(["OWNER", "ADMIN"]), async (req, res) => {
+  try {
+    const { decision, reason } = req.body;
+    if (!["ALLOW", "BLOCK"].includes(decision)) {
+      return res.status(400).json({ error: { message: "Decision must be ALLOW or BLOCK" } });
+    }
+    if (!reason || reason.trim().length < 5) {
+      return res.status(400).json({ error: { message: "A substantive administrative reason is required." } });
+    }
+    const resolved = await db.adminRepo.resolveComplianceReview(req.auth.tenant.id, req.params.id, decision, reason, req.auth.user);
+    res.json({ data: resolved });
+  } catch (err) {
+    res.status(500).json({ error: { message: err?.message || "Failed to resolve compliance review" } });
+  }
+});
+api.get("/admin/blocklist", requireRole(["OWNER", "ADMIN", "MANAGER"]), async (req, res) => {
+  try {
+    const blocklist = await db.adminRepo.getGlobalBlocklist(req.auth.tenant.id);
+    res.json({ data: blocklist });
+  } catch (err) {
+    handleDatabaseError(err, res);
+  }
+});
+api.post("/admin/blocklist", requireRole(["OWNER", "ADMIN", "MANAGER"]), async (req, res) => {
+  try {
+    const { identifier, reason } = req.body;
+    if (!identifier || !reason) {
+      return res.status(400).json({ error: { message: "Identifier (phone/email) and reason are required." } });
+    }
+    const result = await db.adminRepo.addGlobalBlock(req.auth.tenant.id, identifier, reason, req.auth.user);
+    res.json({ data: result });
+  } catch (err) {
+    res.status(500).json({ error: { message: err?.message || "Failed to add to blocklist" } });
+  }
+});
+api.delete("/admin/blocklist/:id", requireRole(["OWNER", "ADMIN", "MANAGER"]), async (req, res) => {
+  try {
+    await db.adminRepo.removeGlobalBlock(req.auth.tenant.id, req.params.id, req.auth.user);
+    res.json({ data: { success: true } });
+  } catch (err) {
+    res.status(500).json({ error: { message: err?.message || "Failed to remove from blocklist" } });
+  }
+});
+api.get("/admin/system/health", requireRole(["OWNER", "ADMIN"]), async (req, res) => {
+  try {
+    const health = await db.adminRepo.getSystemHealth(req.auth.tenant.id);
+    res.json({ data: health });
   } catch (err) {
     handleDatabaseError(err, res);
   }

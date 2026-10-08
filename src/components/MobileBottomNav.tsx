@@ -48,6 +48,7 @@ export const MobileBottomNav: React.FC<MobileBottomNavProps> = ({
   ];
 
   const moreTabs: { id: NavTab; label: string; desc: string; icon: React.FC<{ className?: string }> }[] = [
+    { id: 'admin', label: 'Admin Console', desc: 'Team RBAC, policy reviews & suppression', icon: ShieldCheck },
     { id: 'lists', label: 'Lists & Segments', desc: 'Audience filtering & customer groupings', icon: ListFilter },
     { id: 'import', label: 'Import Wizard', desc: 'CSV & Excel spreadsheet ingestion', icon: UploadCloud },
     { id: 'ai', label: 'AI Copilot', desc: 'Gemini template writer & campaign assistant', icon: Sparkles },

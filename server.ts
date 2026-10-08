@@ -1651,6 +1651,116 @@ api.get('/stats', async (req: AuthenticatedRequest, res: Response) => {
   }
 });
 
+// ---------------- 12. Admin Console & Governance Capabilities ----------------
+api.get('/admin/members', requireRole(['OWNER', 'ADMIN', 'MANAGER']), async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const members = await db.adminRepo.listMembers(req.auth!.tenant.id);
+    res.json({ data: members });
+  } catch (err) {
+    handleDatabaseError(err, res);
+  }
+});
+
+api.put('/admin/members/:id/role', requireRole(['OWNER', 'ADMIN']), async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const { role } = req.body;
+    if (!['OWNER', 'ADMIN', 'MANAGER', 'OPERATOR', 'VIEWER'].includes(role)) {
+      return res.status(400).json({ error: { message: 'Invalid role specified.' } });
+    }
+    const updated = await db.adminRepo.updateMemberRole(req.auth!.tenant.id, req.params.id, role, req.auth!.user);
+    res.json({ data: updated });
+  } catch (err: any) {
+    res.status(400).json({ error: { message: err?.message || 'Failed to update member role' } });
+  }
+});
+
+api.delete('/admin/members/:id', requireRole(['OWNER', 'ADMIN']), async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    await db.adminRepo.removeMember(req.auth!.tenant.id, req.params.id, req.auth!.user);
+    res.json({ data: { success: true } });
+  } catch (err: any) {
+    res.status(400).json({ error: { message: err?.message || 'Failed to remove member' } });
+  }
+});
+
+api.post('/admin/members/invite', requireRole(['OWNER', 'ADMIN']), async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const { email, name, role } = req.body;
+    if (!email || !name || !role) {
+      return res.status(400).json({ error: { message: 'Email, name, and role are required.' } });
+    }
+    const newMember = await db.adminRepo.inviteMember(req.auth!.tenant.id, email, name, role, req.auth!.user);
+    res.json({ data: newMember });
+  } catch (err: any) {
+    res.status(400).json({ error: { message: err?.message || 'Failed to invite member' } });
+  }
+});
+
+api.get('/admin/compliance/reviews', requireRole(['OWNER', 'ADMIN', 'MANAGER']), async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const reviews = await db.adminRepo.getComplianceReviews(req.auth!.tenant.id);
+    res.json({ data: reviews });
+  } catch (err) {
+    handleDatabaseError(err, res);
+  }
+});
+
+api.post('/admin/compliance/reviews/:id/resolve', requireRole(['OWNER', 'ADMIN']), async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const { decision, reason } = req.body;
+    if (!['ALLOW', 'BLOCK'].includes(decision)) {
+      return res.status(400).json({ error: { message: 'Decision must be ALLOW or BLOCK' } });
+    }
+    if (!reason || reason.trim().length < 5) {
+      return res.status(400).json({ error: { message: 'A substantive administrative reason is required.' } });
+    }
+    const resolved = await db.adminRepo.resolveComplianceReview(req.auth!.tenant.id, req.params.id, decision, reason, req.auth!.user);
+    res.json({ data: resolved });
+  } catch (err: any) {
+    res.status(500).json({ error: { message: err?.message || 'Failed to resolve compliance review' } });
+  }
+});
+
+api.get('/admin/blocklist', requireRole(['OWNER', 'ADMIN', 'MANAGER']), async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const blocklist = await db.adminRepo.getGlobalBlocklist(req.auth!.tenant.id);
+    res.json({ data: blocklist });
+  } catch (err) {
+    handleDatabaseError(err, res);
+  }
+});
+
+api.post('/admin/blocklist', requireRole(['OWNER', 'ADMIN', 'MANAGER']), async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const { identifier, reason } = req.body;
+    if (!identifier || !reason) {
+      return res.status(400).json({ error: { message: 'Identifier (phone/email) and reason are required.' } });
+    }
+    const result = await db.adminRepo.addGlobalBlock(req.auth!.tenant.id, identifier, reason, req.auth!.user);
+    res.json({ data: result });
+  } catch (err: any) {
+    res.status(500).json({ error: { message: err?.message || 'Failed to add to blocklist' } });
+  }
+});
+
+api.delete('/admin/blocklist/:id', requireRole(['OWNER', 'ADMIN', 'MANAGER']), async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    await db.adminRepo.removeGlobalBlock(req.auth!.tenant.id, req.params.id, req.auth!.user);
+    res.json({ data: { success: true } });
+  } catch (err: any) {
+    res.status(500).json({ error: { message: err?.message || 'Failed to remove from blocklist' } });
+  }
+});
+
+api.get('/admin/system/health', requireRole(['OWNER', 'ADMIN']), async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const health = await db.adminRepo.getSystemHealth(req.auth!.tenant.id);
+    res.json({ data: health });
+  } catch (err) {
+    handleDatabaseError(err, res);
+  }
+});
+
 // Mount versioned API routes (supporting /api/v1 as well as /v1 and /api)
 app.use('/api/v1', api);
 app.use('/v1', api);

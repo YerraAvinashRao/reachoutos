@@ -442,6 +442,77 @@ class ApiClient {
     const json = await this.request('/api/v1/stats');
     return json.data;
   }
+
+  // ================= ADMIN & GOVERNANCE CAPABILITIES =================
+  async adminListMembers() {
+    const json = await this.request('/api/v1/admin/members');
+    return json.data;
+  }
+
+  async adminInviteMember(email: string, name: string, role: string) {
+    const json = await this.request('/api/v1/admin/members/invite', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email, name, role })
+    });
+    return json.data;
+  }
+
+  async adminUpdateMemberRole(memberId: string, role: string) {
+    const json = await this.request(`/api/v1/admin/members/${memberId}/role`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ role })
+    });
+    return json.data;
+  }
+
+  async adminRemoveMember(memberId: string) {
+    const json = await this.request(`/api/v1/admin/members/${memberId}`, {
+      method: 'DELETE'
+    });
+    return json.data;
+  }
+
+  async adminGetComplianceReviews() {
+    const json = await this.request('/api/v1/admin/compliance/reviews');
+    return json.data;
+  }
+
+  async adminResolveComplianceReview(reviewId: string, decision: 'ALLOW' | 'BLOCK', reason: string) {
+    const json = await this.request(`/api/v1/admin/compliance/reviews/${reviewId}/resolve`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ decision, reason })
+    });
+    return json.data;
+  }
+
+  async adminGetBlocklist() {
+    const json = await this.request('/api/v1/admin/blocklist');
+    return json.data;
+  }
+
+  async adminAddBlocklist(identifier: string, reason: string) {
+    const json = await this.request('/api/v1/admin/blocklist', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ identifier, reason })
+    });
+    return json.data;
+  }
+
+  async adminRemoveBlocklist(contactId: string) {
+    const json = await this.request(`/api/v1/admin/blocklist/${contactId}`, {
+      method: 'DELETE'
+    });
+    return json.data;
+  }
+
+  async adminGetSystemHealth() {
+    const json = await this.request('/api/v1/admin/system/health');
+    return json.data;
+  }
 }
 
 export const apiClient = new ApiClient();

@@ -14,6 +14,7 @@ import { ManualSendingWorkspace } from './components/ManualSendingWorkspace';
 import { AICopilotView } from './components/AICopilotView';
 import { AuditLogView } from './components/AuditLogView';
 import { SettingsView } from './components/SettingsView';
+import { AdminConsoleView } from './components/AdminConsoleView';
 import { KeyboardShortcutsModal } from './components/KeyboardShortcutsModal';
 import { TourEngine } from './components/tour/TourEngine';
 import { LoginView } from './components/LoginView';
@@ -399,6 +400,31 @@ export default function App() {
     const link = document.createElement('a');
     link.setAttribute('href', encodedUri);
     link.setAttribute('download', `reachout_os_contacts_${new Date().toISOString().split('T')[0]}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
+  const handleExportAuditLogs = () => {
+    if (auditLogs.length === 0) return;
+    const headers = ['ID', 'Timestamp', 'Actor Name', 'Actor Role', 'Action', 'Entity Type', 'Entity ID', 'IP Address', 'Metadata', 'Entry Hash'];
+    const rows = auditLogs.map(l => [
+      l.id,
+      l.createdAt,
+      `"${(l.actorName || '').replace(/"/g, '""')}"`,
+      l.actorRole,
+      l.action,
+      l.entityType,
+      l.entityId,
+      l.ipAddress,
+      `"${JSON.stringify(l.metadata || {}).replace(/"/g, '""')}"`,
+      l.entryHash || ''
+    ]);
+    const csvContent = 'data:text/csv;charset=utf-8,' + [headers.join(','), ...rows.map(r => r.join(','))].join('\n');
+    const encodedUri = encodeURI(csvContent);
+    const link = document.createElement('a');
+    link.setAttribute('href', encodedUri);
+    link.setAttribute('download', `reachout_os_audit_ledger_${new Date().toISOString().split('T')[0]}.csv`);
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
@@ -1034,6 +1060,13 @@ export default function App() {
                 />
               ) : activeTab === 'audit' ? (
                 <AuditLogView logs={auditLogs} />
+              ) : activeTab === 'admin' ? (
+                <AdminConsoleView
+                  tenant={tenant}
+                  currentUser={user}
+                  onToggleKillSwitch={(reason) => handleToggleKillSwitch(reason)}
+                  onExportAuditLogs={handleExportAuditLogs}
+                />
               ) : activeTab === 'settings' ? (
                 <SettingsView
                   tenant={tenant}
