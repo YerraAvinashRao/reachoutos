@@ -2131,6 +2131,20 @@ api.post(
       );
       (async () => {
         try {
+          const client = db.getClient();
+          if (isBlocked) {
+            await client.from("campaign_recipients").update({
+              status: "BLOCKED",
+              policy_notes: `Globally blocked: ${reason || "Suppressed by operator"}`,
+              updated_at: (/* @__PURE__ */ new Date()).toISOString()
+            }).eq("contact_id", contact.id).neq("status", "USER_SENT");
+          } else {
+            await client.from("campaign_recipients").update({
+              status: "READY",
+              policy_notes: null,
+              updated_at: (/* @__PURE__ */ new Date()).toISOString()
+            }).eq("contact_id", contact.id).eq("status", "BLOCKED");
+          }
           await db.contactsRepo.addTimelineEvent({
             contactId: contact.id,
             tenantId: req.auth.tenant.id,
@@ -2875,6 +2889,23 @@ api.post(
         status: "SKIPPED",
         skippedAt: (/* @__PURE__ */ new Date()).toISOString(),
         skipReason: reason
+      });
+      res.json({ data: updated });
+    } catch (err) {
+      handleDatabaseError(err, res);
+    }
+  }
+);
+api.post(
+  "/campaigns/:id/recipients/:recipientId/block",
+  requireRole(["OWNER", "ADMIN", "MANAGER", "OPERATOR"]),
+  async (req, res) => {
+    try {
+      const { recipientId } = req.params;
+      const { reason = "Contact globally suppressed by operator" } = req.body;
+      const updated = await db.campaignsRepo.updateRecipient(recipientId, {
+        status: "BLOCKED",
+        policyNotes: reason
       });
       res.json({ data: updated });
     } catch (err) {

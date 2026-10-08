@@ -56,14 +56,14 @@ export const CampaignDetailView: React.FC<CampaignDetailViewProps> = ({
   const [testResult, setTestResult] = useState<any>(null);
   const [testLoading, setTestLoading] = useState(false);
 
-  // Audience Breakdown stats
+  // Audience Breakdown stats (strictly classifying globally blocked contacts as BLOCKED)
   const total = recipients.length;
   const sent = recipients.filter(r => r.status === 'USER_SENT').length;
   const opened = recipients.filter(r => r.status === 'OPENED').length;
-  const skipped = recipients.filter(r => r.status === 'SKIPPED').length;
-  const blocked = recipients.filter(r => r.status === 'BLOCKED').length;
+  const blocked = recipients.filter(r => r.status === 'BLOCKED' || Boolean(contacts.find(c => c.id === r.contactId)?.isGloballyBlocked)).length;
   const optedOut = recipients.filter(r => r.status === 'OPTED_OUT').length;
-  const ready = recipients.filter(r => r.status === 'READY').length;
+  const skipped = recipients.filter(r => r.status === 'SKIPPED' && !contacts.find(c => c.id === r.contactId)?.isGloballyBlocked).length;
+  const ready = recipients.filter(r => r.status === 'READY' && !contacts.find(c => c.id === r.contactId)?.isGloballyBlocked).length;
 
   const handleRunTest = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -354,36 +354,47 @@ export const CampaignDetailView: React.FC<CampaignDetailViewProps> = ({
                     </td>
                   </tr>
                 ) : (
-                  recipients.slice((queuePage - 1) * queuePageSize, queuePage * queuePageSize).map(r => (
-                    <tr key={r.id} className="hover:bg-neutral-50/50 dark:hover:bg-neutral-800/40">
-                      <td className="p-2.5 font-semibold text-neutral-900 dark:text-neutral-100">{r.contactName}</td>
-                      <td className="p-2.5 text-neutral-500">{r.companyName}</td>
-                      <td className="p-2.5 font-mono text-[11px] text-neutral-700 dark:text-neutral-300">{r.channelAddress}</td>
-                      <td className="p-2.5">
-                        <span className={`px-2 py-0.5 rounded text-[10px] font-mono font-medium ${
-                          r.status === 'USER_SENT'
-                            ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-400 font-bold'
-                            : r.status === 'OPENED'
-                            ? 'bg-blue-100 text-blue-800 dark:bg-blue-950 dark:text-blue-300 font-semibold'
-                            : r.status === 'SKIPPED'
-                            ? 'bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-400'
-                            : r.status === 'BLOCKED' || r.status === 'OPTED_OUT'
-                            ? 'bg-rose-100 text-rose-800 dark:bg-rose-950 dark:text-rose-400'
-                            : 'bg-neutral-100 text-neutral-600 dark:bg-neutral-800 dark:text-neutral-400'
-                        }`}>
-                          {r.status === 'USER_SENT'
-                            ? 'CONFIRMED SENT'
-                            : r.status === 'OPENED'
-                            ? 'OPENED (PENDING SEND)'
-                            : r.status}
-                        </span>
-                      </td>
-                      <td className="p-2.5 text-neutral-400 text-[11px]">{r.claimedByOperator || '—'}</td>
-                      <td className="p-2.5 text-neutral-400 text-[11px] font-mono">
-                        {r.userSentAt ? `Sent: ${new Date(r.userSentAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}` : r.openedAt ? `Opened: ${new Date(r.openedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}` : '—'}
-                      </td>
-                    </tr>
-                  ))
+                  recipients.slice((queuePage - 1) * queuePageSize, queuePage * queuePageSize).map(r => {
+                    const contact = contacts.find(c => c.id === r.contactId);
+                    const isBlocked = r.status === 'BLOCKED' || Boolean(contact?.isGloballyBlocked);
+                    const isOptedOut = r.status === 'OPTED_OUT';
+                    const effectiveStatus = isBlocked ? 'BLOCKED' : r.status;
+
+                    return (
+                      <tr key={r.id} className="hover:bg-neutral-50/50 dark:hover:bg-neutral-800/40">
+                        <td className="p-2.5 font-semibold text-neutral-900 dark:text-neutral-100">{r.contactName}</td>
+                        <td className="p-2.5 text-neutral-500">{r.companyName}</td>
+                        <td className="p-2.5 font-mono text-[11px] text-neutral-700 dark:text-neutral-300">{r.channelAddress}</td>
+                        <td className="p-2.5">
+                          <span className={`px-2 py-0.5 rounded text-[10px] font-mono font-medium ${
+                            effectiveStatus === 'USER_SENT'
+                              ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-400 font-bold'
+                              : effectiveStatus === 'OPENED'
+                              ? 'bg-blue-100 text-blue-800 dark:bg-blue-950 dark:text-blue-300 font-semibold'
+                              : effectiveStatus === 'SKIPPED'
+                              ? 'bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-400'
+                              : effectiveStatus === 'BLOCKED' || isOptedOut
+                              ? 'bg-rose-100 text-rose-800 dark:bg-rose-950 dark:text-rose-400 font-bold'
+                              : 'bg-neutral-100 text-neutral-600 dark:bg-neutral-800 dark:text-neutral-400'
+                          }`}>
+                            {effectiveStatus === 'USER_SENT'
+                              ? 'CONFIRMED SENT'
+                              : effectiveStatus === 'OPENED'
+                              ? 'OPENED (PENDING SEND)'
+                              : effectiveStatus === 'BLOCKED'
+                              ? 'BLOCKED / SUPPRESSED'
+                              : isOptedOut
+                              ? 'OPTED OUT'
+                              : effectiveStatus}
+                          </span>
+                        </td>
+                        <td className="p-2.5 text-neutral-400 text-[11px]">{r.claimedByOperator || '—'}</td>
+                        <td className="p-2.5 text-neutral-400 text-[11px] font-mono">
+                          {r.userSentAt ? `Sent: ${new Date(r.userSentAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}` : r.openedAt ? `Opened: ${new Date(r.openedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}` : '—'}
+                        </td>
+                      </tr>
+                    );
+                  })
                 )}
               </tbody>
             </table>

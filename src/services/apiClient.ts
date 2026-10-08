@@ -362,6 +362,15 @@ class ApiClient {
     return json.data;
   }
 
+  async blockRecipient(campaignId: string, recipientId: string, reason?: string) {
+    const json = await this.request(`/api/v1/campaigns/${campaignId}/recipients/${recipientId}/block`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ reason })
+    });
+    return json.data;
+  }
+
   async sendTest(campaignId: string, testPhone: string, testName: string) {
     const json = await this.request(`/api/v1/campaigns/${campaignId}/send-test`, {
       method: 'POST',

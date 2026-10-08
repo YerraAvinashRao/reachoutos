@@ -264,20 +264,41 @@ export default function App() {
   };
 
   const handleToggleBlock = async (contactId: string, reason?: string) => {
+    const isCurrentlyBlocked = Boolean(contacts.find(c => c.id === contactId)?.isGloballyBlocked);
+    const nextBlocked = !isCurrentlyBlocked;
     // 0ms Optimistic UI updates across contacts, campaign recipients, and selected contact
-    setContacts(prev => prev.map(c => c.id === contactId ? { ...c, isGloballyBlocked: !c.isGloballyBlocked } : c));
-    setCampaignRecipients(prev => prev.map(r => r.contactId === contactId ? { ...r, status: 'BLOCKED' } : r));
+    setContacts(prev => prev.map(c => c.id === contactId ? { ...c, isGloballyBlocked: nextBlocked } : c));
+    setCampaignRecipients(prev => {
+      const next = prev.map(r => r.contactId === contactId ? {
+        ...r,
+        status: (nextBlocked ? 'BLOCKED' : 'READY') as any,
+        policyNotes: nextBlocked ? (reason || 'Globally suppressed') : undefined
+      } : r);
+      if (selectedCampaignId) recipientsCacheRef.current[selectedCampaignId] = next;
+      return next;
+    });
+    setCampaigns(prev => prev.map(c => c.id === selectedCampaignId ? {
+      ...c,
+      blockedCount: Math.max(0, (c.blockedCount || 0) + (nextBlocked ? 1 : -1))
+    } : c));
     if (selectedContact && selectedContact.id === contactId) {
-      setSelectedContact(prev => prev ? { ...prev, isGloballyBlocked: !prev.isGloballyBlocked } : null);
+      setSelectedContact(prev => prev ? { ...prev, isGloballyBlocked: nextBlocked } : null);
     }
     try {
       await apiClient.toggleContactBlock(contactId, reason);
     } catch (err) {
       console.error('Toggle block error, reverting:', err);
-      setContacts(prev => prev.map(c => c.id === contactId ? { ...c, isGloballyBlocked: !c.isGloballyBlocked } : c));
-      setCampaignRecipients(prev => prev.map(r => r.contactId === contactId ? { ...r, status: 'READY' } : r));
+      setContacts(prev => prev.map(c => c.id === contactId ? { ...c, isGloballyBlocked: isCurrentlyBlocked } : c));
+      setCampaignRecipients(prev => {
+        const next = prev.map(r => r.contactId === contactId ? {
+          ...r,
+          status: (isCurrentlyBlocked ? 'BLOCKED' : 'READY') as any
+        } : r);
+        if (selectedCampaignId) recipientsCacheRef.current[selectedCampaignId] = next;
+        return next;
+      });
       if (selectedContact && selectedContact.id === contactId) {
-        setSelectedContact(prev => prev ? { ...prev, isGloballyBlocked: !prev.isGloballyBlocked } : null);
+        setSelectedContact(prev => prev ? { ...prev, isGloballyBlocked: isCurrentlyBlocked } : null);
       }
     }
   };
@@ -654,6 +675,16 @@ export default function App() {
                     });
                     setCampaigns(prev => prev.map(c => c.id === selectedCampaign.id ? { ...c, skippedCount: (c.skippedCount || 0) + 1 } : c));
                     return apiClient.skipRecipient(selectedCampaign.id, recipientId, reason);
+                  }}
+                  onBlockRecipient={async (recipientId, reason) => {
+                    // Split-second optimistic update: instantly mark BLOCKED and advance
+                    setCampaignRecipients(prev => {
+                      const next = prev.map(r => r.id === recipientId ? { ...r, status: 'BLOCKED' as const, policyNotes: reason || 'Contact globally suppressed' } : r);
+                      if (selectedCampaign) recipientsCacheRef.current[selectedCampaign.id] = next;
+                      return next;
+                    });
+                    setCampaigns(prev => prev.map(c => c.id === selectedCampaign.id ? { ...c, blockedCount: (c.blockedCount || 0) + 1 } : c));
+                    return apiClient.blockRecipient(selectedCampaign.id, recipientId, reason);
                   }}
                   onToggleBlock={handleToggleBlock}
                   onPauseCampaign={async () => {

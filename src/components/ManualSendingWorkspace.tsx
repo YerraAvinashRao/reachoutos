@@ -30,6 +30,7 @@ interface ManualSendingWorkspaceProps {
   onPrepare: (recipientId: string) => Promise<any>;
   onMarkSent: (recipientId: string) => Promise<any>;
   onSkip: (recipientId: string, reason?: string) => Promise<any>;
+  onBlockRecipient?: (recipientId: string, reason?: string) => Promise<any>;
   onToggleBlock: (contactId: string, reason?: string) => Promise<any>;
   onPauseCampaign: () => void;
   userRole: Role;
@@ -43,6 +44,7 @@ export const ManualSendingWorkspace: React.FC<ManualSendingWorkspaceProps> = ({
   onPrepare,
   onMarkSent,
   onSkip,
+  onBlockRecipient,
   onToggleBlock,
   onPauseCampaign,
   userRole
@@ -163,12 +165,12 @@ export const ManualSendingWorkspace: React.FC<ManualSendingWorkspaceProps> = ({
       // Fire suppression updates concurrently in background
       Promise.all([
         onToggleBlock(contactId, 'Suppressed during campaign review'),
-        onSkip(recipientId, 'Contact globally suppressed')
+        onBlockRecipient ? onBlockRecipient(recipientId, 'Contact globally suppressed') : Promise.resolve()
       ]).catch((err: any) => {
         console.error('Background block & suppression error:', err);
       });
     }
-  }, [currentContact, currentRecipient, userRole, onToggleBlock, onSkip, advanceToNext]);
+  }, [currentContact, currentRecipient, userRole, onToggleBlock, onBlockRecipient, advanceToNext]);
 
   // Copy message
   const handleCopyMessage = () => {
