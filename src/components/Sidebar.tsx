@@ -10,18 +10,24 @@ import {
   History, 
   Settings,
   ShieldCheck,
-  BookOpen
+  BookOpen,
+  TrendingUp,
+  MessageSquare,
+  GitMerge
 } from 'lucide-react';
 
 import { Tenant, User, Role } from '../types';
 
 export type NavTab = 
   | 'dashboard'
+  | 'inbox'
+  | 'cadences'
   | 'contacts'
   | 'import'
   | 'lists'
   | 'templates'
   | 'campaigns'
+  | 'analytics'
   | 'ai'
   | 'audit'
   | 'admin'
@@ -48,6 +54,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
   const navItems = [
     { id: 'dashboard' as NavTab, label: 'Dashboard', icon: LayoutDashboard },
+    { id: 'inbox' as NavTab, label: 'Smart Inbox', icon: MessageSquare, badge: 'Live' },
+    { id: 'cadences' as NavTab, label: 'Follow-Up Cadences', icon: GitMerge },
     { id: 'contacts' as NavTab, label: 'Contacts', icon: Users },
     { id: 'import' as NavTab, label: 'Import Wizard', icon: UploadCloud },
     { id: 'lists' as NavTab, label: 'Lists & Segments', icon: ListFilter },
@@ -58,6 +66,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
       icon: Send, 
       badge: activeCampaignsCount > 0 ? `${activeCampaignsCount} Active` : undefined 
     },
+    { id: 'analytics' as NavTab, label: 'Funnel Analytics', icon: TrendingUp },
     { id: 'ai' as NavTab, label: 'AI Copilot', icon: Sparkles },
     { id: 'audit' as NavTab, label: 'Audit Log', icon: History },
     ...(isAdminOrOwner ? [{ id: 'admin' as NavTab, label: 'Admin Console', icon: ShieldCheck, badge: 'PRO' }] : []),

@@ -14,6 +14,9 @@ import {
   LogOut, 
   X,
   ShieldCheck,
+  TrendingUp,
+  MessageSquare,
+  GitMerge,
   Building2
 } from 'lucide-react';
 import { NavTab } from './Sidebar';
@@ -42,12 +45,15 @@ export const MobileBottomNav: React.FC<MobileBottomNavProps> = ({
 
   const mainTabs: { id: NavTab; label: string; icon: React.FC<{ className?: string }> }[] = [
     { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
-    { id: 'contacts', label: 'Contacts', icon: Users },
+    { id: 'inbox', label: 'Inbox', icon: MessageSquare },
     { id: 'campaigns', label: 'Campaigns', icon: Send },
-    { id: 'templates', label: 'Templates', icon: FileText },
+    { id: 'contacts', label: 'Contacts', icon: Users },
   ];
 
   const moreTabs: { id: NavTab; label: string; desc: string; icon: React.FC<{ className?: string }> }[] = [
+    { id: 'cadences', label: 'Follow-Up Cadences', desc: 'Multi-touch sequences & daily queues', icon: GitMerge },
+    { id: 'templates', label: 'Templates', desc: 'Commercial message blueprints & categories', icon: FileText },
+    { id: 'analytics', label: 'Funnel Analytics', desc: 'Conversion funnel & operator velocity', icon: TrendingUp },
     { id: 'admin', label: 'Admin Console', desc: 'Team RBAC, policy reviews & suppression', icon: ShieldCheck },
     { id: 'lists', label: 'Lists & Segments', desc: 'Audience filtering & customer groupings', icon: ListFilter },
     { id: 'import', label: 'Import Wizard', desc: 'CSV & Excel spreadsheet ingestion', icon: UploadCloud },

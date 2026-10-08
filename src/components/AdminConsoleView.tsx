@@ -30,6 +30,7 @@ import {
 } from 'lucide-react';
 import { apiClient } from '../services/apiClient';
 import { Tenant, User, Role, TenantMemberDetail, ComplianceReviewItem, GlobalBlockItem, SystemHealthStats } from '../types';
+import { GovernanceWorkflowService } from '../core/governance/GovernanceWorkflowService';
 
 interface AdminConsoleViewProps {
   tenant: Tenant | null;
@@ -767,6 +768,79 @@ export const AdminConsoleView: React.FC<AdminConsoleViewProps> = ({
                 </button>
               </div>
             )}
+          </div>
+
+          {/* Campaign Approval & Compliance Sandbox */}
+          <div className="p-5 rounded-xl border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 shadow-sm space-y-4">
+            <div className="flex items-center justify-between border-b border-neutral-100 dark:border-neutral-800 pb-3">
+              <div>
+                <h3 className="text-sm font-bold text-neutral-900 dark:text-neutral-100">
+                  Campaign Governance & Approval Sandbox
+                </h3>
+                <p className="text-xs text-neutral-500 mt-0.5">
+                  Pre-flight compliance audits and manager/admin approvals required before broadcast dispatch.
+                </p>
+              </div>
+              <span className="px-2 py-0.5 rounded-full bg-indigo-50 dark:bg-indigo-950/60 text-indigo-700 dark:text-indigo-300 font-mono text-[10px] font-bold">
+                MULTI-TIER GOVERNANCE ACTIVE
+              </span>
+            </div>
+
+            <div className="space-y-3">
+              {GovernanceWorkflowService.getReviews().map((review) => (
+                <div key={review.campaignId} className="p-3.5 rounded-xl border border-neutral-200 dark:border-neutral-800 bg-neutral-50/40 dark:bg-neutral-800/30 space-y-3">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <span className="font-bold text-xs text-neutral-900 dark:text-neutral-100">
+                          {review.campaignName}
+                        </span>
+                        <span className={`px-2 py-0.2 rounded text-[10px] font-bold ${
+                          review.status === 'APPROVED' 
+                            ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-400' 
+                            : 'bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-400'
+                        }`}>
+                          {review.status}
+                        </span>
+                      </div>
+                      <div className="text-[11px] text-neutral-400 mt-0.5">
+                        Submitted by: {review.submittedBy} • {new Date(review.submittedAt).toLocaleDateString()}
+                      </div>
+                    </div>
+
+                    <div className="text-[11px] text-neutral-500 font-mono">
+                      Reviewed by: <strong>{review.reviewedBy || 'Pending Admin'}</strong> ({review.reviewerRole || 'ADMIN'})
+                    </div>
+                  </div>
+
+                  {/* Checklist Pills */}
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-[11px] font-mono">
+                    <div className="p-2 rounded bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 flex items-center justify-between">
+                      <span className="text-neutral-500">Opt-in Coverage:</span>
+                      <strong className="text-emerald-600">{review.checklist.consentCoveragePercent}%</strong>
+                    </div>
+                    <div className="p-2 rounded bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 flex items-center justify-between">
+                      <span className="text-neutral-500">Meta Policy:</span>
+                      <strong className="text-emerald-600">{review.checklist.metaPolicyCompliant ? 'PASS' : 'FLAGGED'}</strong>
+                    </div>
+                    <div className="p-2 rounded bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 flex items-center justify-between">
+                      <span className="text-neutral-500">Prohibited Words:</span>
+                      <strong className="text-emerald-600">{review.checklist.prohibitedTermsDetected ? 'FOUND' : 'NONE'}</strong>
+                    </div>
+                    <div className="p-2 rounded bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 flex items-center justify-between">
+                      <span className="text-neutral-500">Pacing Gate:</span>
+                      <strong className="text-emerald-600">{review.checklist.pacingThrottleEnforced ? 'ACTIVE' : 'OFF'}</strong>
+                    </div>
+                  </div>
+
+                  {review.reviewNotes && (
+                    <div className="text-[11px] text-neutral-600 dark:text-neutral-400 bg-white dark:bg-neutral-900 p-2.5 rounded-lg border border-neutral-200 dark:border-neutral-800">
+                      <strong>Audit Sign-off Note:</strong> {review.reviewNotes}
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
           </div>
 
           <div className="p-5 rounded-xl border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 shadow-sm flex items-center justify-between">

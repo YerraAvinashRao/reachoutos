@@ -13,10 +13,15 @@ import {
   User as UserIcon,
   CheckCircle2,
   AlertCircle,
-  Loader2
+  Loader2,
+  Globe,
+  Link2,
+  Zap,
+  Send
 } from 'lucide-react';
 import { Tenant, Role, User } from '../types';
 import { supabase } from '../services/supabaseClient';
+import { WebhookGatewayService, WebhookEndpoint } from '../core/integrations/WebhookGatewayService';
 
 interface SettingsViewProps {
   tenant: Tenant | null;
@@ -421,7 +426,66 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
         </div>
       </div>
 
-      {/* 4. Data Lifecycle & Export */}
+      {/* 4. Universal Webhook & CRM Sync Gateway */}
+      <div className="p-5 rounded-xl border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 shadow-sm space-y-4">
+        <div className="flex items-center justify-between border-b border-neutral-100 dark:border-neutral-800 pb-3">
+          <div>
+            <h3 className="font-bold text-neutral-900 dark:text-neutral-100 text-sm flex items-center gap-2">
+              <Globe className="w-4 h-4 text-indigo-500" />
+              <span>Universal Webhooks & CRM Sync Gateway</span>
+            </h3>
+            <p className="text-[11px] text-neutral-500 mt-0.5">
+              Real-time HMAC-signed outbound webhooks connecting ReachOutOS with HubSpot, Salesforce, Zoho, or Google Sheets.
+            </p>
+          </div>
+          <span className="px-2 py-0.5 rounded-full bg-emerald-50 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-400 font-mono text-[10px] font-bold">
+            HMAC SHA-256 SIGNED
+          </span>
+        </div>
+
+        <div className="space-y-3">
+          {WebhookGatewayService.getEndpoints().map((ep) => (
+            <div key={ep.id} className="p-3.5 rounded-xl border border-neutral-200 dark:border-neutral-800 bg-neutral-50/50 dark:bg-neutral-800/30 space-y-2">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                <div className="flex items-center gap-2">
+                  <span className="font-bold text-xs text-neutral-900 dark:text-neutral-100">{ep.name}</span>
+                  <span className="px-2 py-0.2 rounded-full bg-emerald-100 dark:bg-emerald-950 text-emerald-700 dark:text-emerald-400 font-mono text-[9px] font-bold">
+                    ACTIVE
+                  </span>
+                </div>
+                <button
+                  onClick={async () => {
+                    const log = await WebhookGatewayService.testEndpoint(ep.id);
+                    alert(`✓ Webhook Test Ping Sent to ${ep.name}!\nResponse: HTTP ${log.statusCode} (Latency: ${log.durationMs}ms)`);
+                  }}
+                  className="px-2.5 py-1 rounded bg-indigo-600 hover:bg-indigo-700 text-white text-[10px] font-bold flex items-center gap-1 transition shadow-2xs cursor-pointer self-start sm:self-auto"
+                >
+                  <Zap className="w-3 h-3 text-amber-300" />
+                  <span>Send Test Ping</span>
+                </button>
+              </div>
+
+              <div className="text-[11px] font-mono text-neutral-500 truncate">
+                Endpoint URL: <strong className="text-neutral-700 dark:text-neutral-300">{ep.url}</strong>
+              </div>
+
+              <div className="flex items-center justify-between text-[10px] font-mono text-neutral-400 pt-1 border-t border-neutral-200/60 dark:border-neutral-700/60">
+                <div className="flex items-center gap-1.5">
+                  <span>Events:</span>
+                  {ep.subscribedEvents.map(evt => (
+                    <span key={evt} className="px-1.5 py-0.2 rounded bg-neutral-200/60 dark:bg-neutral-800 text-neutral-700 dark:text-neutral-300">
+                      {evt}
+                    </span>
+                  ))}
+                </div>
+                <div>Delivered: <strong className="text-emerald-600">{ep.successCount}</strong></div>
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* 5. Data Lifecycle & Export */}
       <div className="p-5 rounded-xl border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 shadow-sm space-y-3">
         <div className="flex items-center justify-between">
           <div>

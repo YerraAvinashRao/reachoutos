@@ -213,6 +213,9 @@ export interface Campaign {
     attachmentName?: string;
   };
   isDryRun: boolean;
+  isABTest?: boolean;
+  abVariants?: ABVariant[];
+  winningVariantId?: string;
   assignedOperator?: string;
   createdBy: string;
   approvedBy?: string;
@@ -225,6 +228,126 @@ export interface Campaign {
   skippedCount: number;
   blockedCount: number;
   createdAt: string;
+}
+
+export interface ABVariant {
+  id: string;
+  name: string;
+  templateId?: string;
+  templateSnapshot: {
+    name: string;
+    subject?: string;
+    body: string;
+    attachmentName?: string;
+  };
+  allocationPct: number;
+  sentCount: number;
+  openedCount: number;
+  repliedCount: number;
+}
+
+// ================= CADENCE & FOLLOW-UP SEQUENCES =================
+export interface CadenceStep {
+  stepNumber: number;
+  delayDays: number;
+  templateId?: string;
+  templateSnapshot?: {
+    name: string;
+    subject?: string;
+    body: string;
+    attachmentName?: string;
+  };
+  title: string;
+}
+
+export interface CadenceSequence {
+  id: string;
+  tenantId: string;
+  name: string;
+  description?: string;
+  channel: ChannelType;
+  status: 'ACTIVE' | 'PAUSED' | 'ARCHIVED';
+  steps: CadenceStep[];
+  autoExitOnReply: boolean;
+  enrolledCount?: number;
+  completedCount?: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CadenceEnrollment {
+  id: string;
+  tenantId: string;
+  cadenceId: string;
+  contactId: string;
+  contactName?: string;
+  companyName?: string;
+  channelAddress?: string;
+  currentStep: number;
+  status: 'IN_PROGRESS' | 'COMPLETED' | 'PAUSED_REPLIED' | 'OPTED_OUT' | 'SKIPPED';
+  nextDueAt: string;
+  stepHistory: Array<{
+    stepNumber: number;
+    dispatchedAt?: string;
+    operatorName?: string;
+    status: string;
+  }>;
+  createdAt: string;
+  updatedAt: string;
+}
+
+// ================= SMART INBOX & 2-WAY MESSAGING =================
+export interface CannedResponse {
+  id: string;
+  tenantId: string;
+  title: string;
+  shortcut: string;
+  category: 'SALES' | 'SUPPORT' | 'PAYMENTS' | 'SAMPLES' | 'GENERAL';
+  body: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ConversationMessage {
+  id: string;
+  contactId: string;
+  direction: 'INBOUND' | 'OUTBOUND';
+  channel: ChannelType;
+  body: string;
+  status: 'DELIVERED' | 'READ' | 'FAILED' | 'RECEIVED';
+  senderAddress: string;
+  senderName?: string;
+  receivedAt: string;
+  createdAt: string;
+}
+
+export interface ConversationThread {
+  contactId: string;
+  contactName: string;
+  companyName: string;
+  phone: string;
+  email: string;
+  leadStatus: string;
+  isGloballyBlocked: boolean;
+  lastMessageAt: string;
+  lastMessageDirection: 'INBOUND' | 'OUTBOUND';
+  lastMessageSnippet: string;
+  unreadInboundCount: number;
+  serviceWindowExpiresAt?: string;
+  messages: ConversationMessage[];
+}
+
+// ================= DEDUPLICATION & MERGE =================
+export interface DuplicateCandidate {
+  primaryContact: Contact;
+  duplicateContact: Contact;
+  matchReason: string;
+  matchScore: number; // 0 to 100
+  conflictingFields: Array<{
+    fieldName: string;
+    primaryValue: any;
+    duplicateValue: any;
+  }>;
 }
 
 export interface PolicyCheckResult {

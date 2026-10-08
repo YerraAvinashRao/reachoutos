@@ -1,8 +1,9 @@
 import React, { useState } from 'react';
 import { createPortal } from 'react-dom';
-import { Send, Plus, CheckCircle2, Clock, Play, Pause, AlertCircle, Eye, ArrowRight, Trash2, Loader2 } from 'lucide-react';
+import { Send, Plus, CheckCircle2, Clock, Play, Pause, AlertCircle, Eye, ArrowRight, Trash2, Loader2, Split } from 'lucide-react';
 import { Campaign, ContactList, MessageTemplate, Role, ChannelType } from '../types';
 import { ReachOut3DLoader } from './common/ReachOut3DLoader';
+import { ABTestingStudioModal } from './ABTestingStudioModal';
 
 interface CampaignsViewProps {
   campaigns: Campaign[];
@@ -11,6 +12,7 @@ interface CampaignsViewProps {
   onSelectCampaign: (id: string) => void;
   onCreateCampaign: (data: any) => Promise<any> | void;
   onDeleteCampaign?: (id: string) => Promise<void>;
+  onRefresh?: () => void;
   userRole: Role;
 }
 
@@ -24,6 +26,7 @@ export const CampaignsView: React.FC<CampaignsViewProps> = ({
   userRole
 }) => {
   const [showCreateModal, setShowCreateModal] = useState(false);
+  const [showABModal, setShowABModal] = useState(false);
   const [isCreating, setIsCreating] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [formData, setFormData] = useState<{
@@ -94,13 +97,23 @@ export const CampaignsView: React.FC<CampaignsViewProps> = ({
         </div>
 
         {userRole !== 'VIEWER' && (
-          <button
-            onClick={() => setShowCreateModal(true)}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-neutral-900 dark:bg-white text-white dark:text-neutral-900 text-xs font-medium hover:bg-neutral-800 dark:hover:bg-neutral-100 transition shadow-sm"
-          >
-            <Plus className="w-3.5 h-3.5" />
-            <span>New Campaign</span>
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => setShowABModal(true)}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-md border border-purple-300 dark:border-purple-800 bg-purple-50 dark:bg-purple-950/30 text-purple-700 dark:text-purple-300 text-xs font-semibold hover:bg-purple-100 dark:hover:bg-purple-900/40 transition shadow-xs cursor-pointer"
+            >
+              <Split className="w-3.5 h-3.5 text-purple-600 dark:text-purple-400" />
+              <span>A/B Split Test</span>
+            </button>
+
+            <button
+              onClick={() => setShowCreateModal(true)}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-neutral-900 dark:bg-white text-white dark:text-neutral-900 text-xs font-medium hover:bg-neutral-800 dark:hover:bg-neutral-100 transition shadow-sm cursor-pointer"
+            >
+              <Plus className="w-3.5 h-3.5" />
+              <span>New Campaign</span>
+            </button>
+          </div>
         )}
       </div>
 
@@ -329,6 +342,18 @@ export const CampaignsView: React.FC<CampaignsViewProps> = ({
         </div>,
         document.body
       )}
+
+      {/* Modal: A/B Testing Split Studio */}
+      <ABTestingStudioModal
+        isOpen={showABModal}
+        lists={lists}
+        templates={templates}
+        onClose={() => setShowABModal(false)}
+        onCreatedSuccess={() => {
+          setShowABModal(false);
+          if (onRefresh) onRefresh();
+        }}
+      />
     </div>
   );
 };

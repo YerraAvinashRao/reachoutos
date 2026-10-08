@@ -196,6 +196,13 @@ export class InboundWebhookService {
           .eq('contact_id', contact.id)
           .neq('status', 'USER_SENT');
 
+        // Automatically pause/exit active follow-up cadences
+        try {
+          if ((db as any).cadencesRepo?.autoExitOnReply) {
+            await (db as any).cadencesRepo.autoExitOnReply(canonicalPhone, contact.tenantId);
+          }
+        } catch (_) {}
+
         // Add to customer timeline
         await db.contactsRepo.addTimelineEvent({
           contactId: contact.id,
@@ -270,6 +277,13 @@ export class InboundWebhookService {
           actor: payload.senderName || contact.displayName || 'Customer (Inbound WhatsApp)',
           description: `Customer replied: "${payload.messageText.substring(0, 100)}${payload.messageText.length > 100 ? '...' : ''}"`
         });
+
+        // Automatically pause/exit active follow-up cadences on reply
+        try {
+          if ((db as any).cadencesRepo?.autoExitOnReply) {
+            await (db as any).cadencesRepo.autoExitOnReply(canonicalPhone, contact.tenantId);
+          }
+        } catch (_) {}
 
         // Record audit entry
         await db.auditRepo.log({

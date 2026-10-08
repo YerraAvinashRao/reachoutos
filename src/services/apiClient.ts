@@ -523,6 +523,138 @@ class ApiClient {
     });
     return json.data;
   }
+
+  // ================= ANALYTICS & CONVERSION FUNNEL =================
+  async getAnalyticsOverview() {
+    const json = await this.request('/api/v1/analytics/overview');
+    return json.data;
+  }
+
+  async getCampaignFunnel(campaignId: string) {
+    const json = await this.request(`/api/v1/analytics/campaigns/${campaignId}/funnel`);
+    return json.data;
+  }
+
+  // ================= CADENCES & SEQUENCES =================
+  async getCadences() {
+    const json = await this.request('/api/v1/cadences');
+    return json.data;
+  }
+
+  async getCadenceDueToday() {
+    const json = await this.request('/api/v1/cadences/queue/due-today');
+    return json.data;
+  }
+
+  async createCadence(data: any) {
+    const json = await this.request('/api/v1/cadences', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data)
+    });
+    return json.data;
+  }
+
+  async updateCadence(id: string, updates: any) {
+    const json = await this.request(`/api/v1/cadences/${id}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(updates)
+    });
+    return json.data;
+  }
+
+  async deleteCadence(id: string) {
+    return this.request(`/api/v1/cadences/${id}`, { method: 'DELETE' });
+  }
+
+  async enrollContactsInCadence(cadenceId: string, contactIds: string[]) {
+    const json = await this.request(`/api/v1/cadences/${cadenceId}/enroll`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ contactIds })
+    });
+    return json.data;
+  }
+
+  async advanceCadenceStep(enrollmentId: string) {
+    const json = await this.request(`/api/v1/cadences/enrollments/${enrollmentId}/advance`, {
+      method: 'POST'
+    });
+    return json.data;
+  }
+
+  // ================= SMART INBOX & CANNED RESPONSES =================
+  async getInboxThreads() {
+    const json = await this.request('/api/v1/inbox/threads');
+    return json.data;
+  }
+
+  async getInboxMessages(contactId: string) {
+    const json = await this.request(`/api/v1/inbox/threads/${contactId}/messages`);
+    return json.data;
+  }
+
+  async sendInboxMessage(contactId: string, body: string, channel = 'WHATSAPP') {
+    const json = await this.request('/api/v1/inbox/send', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ contactId, body, channel })
+    });
+    return json.data;
+  }
+
+  async getCannedResponses() {
+    const json = await this.request('/api/v1/inbox/canned-responses');
+    return json.data;
+  }
+
+  async createCannedResponse(data: any) {
+    const json = await this.request('/api/v1/inbox/canned-responses', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data)
+    });
+    return json.data;
+  }
+
+  async deleteCannedResponse(id: string) {
+    return this.request(`/api/v1/inbox/canned-responses/${id}`, { method: 'DELETE' });
+  }
+
+  // ================= DEDUPLICATION & MERGE =================
+  async getDuplicateCandidates() {
+    const json = await this.request('/api/v1/contacts/duplicates/candidates');
+    return json.data;
+  }
+
+  async mergeContacts(primaryId: string, duplicateId: string, overrides: any) {
+    const json = await this.request('/api/v1/contacts/merge', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ primaryId, duplicateId, overrides })
+    });
+    return json.data;
+  }
+
+  // ================= CAMPAIGN A/B TESTING =================
+  async createABTestCampaign(data: any) {
+    const json = await this.request('/api/v1/campaigns/ab-test', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data)
+    });
+    return json.data;
+  }
+
+  async promoteABWinner(campaignId: string, winningVariantId: string, templateId?: string, templateSnapshot?: any) {
+    const json = await this.request(`/api/v1/campaigns/${campaignId}/ab-promote-winner`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ winningVariantId, templateId, templateSnapshot })
+    });
+    return json.data;
+  }
 }
 
 export const apiClient = new ApiClient();

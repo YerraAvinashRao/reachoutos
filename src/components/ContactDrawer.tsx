@@ -12,9 +12,13 @@ import {
   Plus, 
   Calendar,
   AlertCircle,
-  Trash2
+  Trash2,
+  Activity,
+  Flame,
+  Zap
 } from 'lucide-react';
 import { Contact, TimelineEvent } from '../types';
+import { Contact360Service } from '../core/analytics/Contact360Service';
 
 interface ContactDrawerProps {
   contact: Contact | null;
@@ -100,6 +104,38 @@ export const ContactDrawer: React.FC<ContactDrawerProps> = ({
           </button>
         </div>
       </div>
+
+      {/* Omnichannel 360 Engagement Scorecard */}
+      {(() => {
+        const p360 = Contact360Service.get360Profile(contact);
+        const tierColors = {
+          HOT: 'bg-rose-50 text-rose-700 dark:bg-rose-950/50 dark:text-rose-300 border-rose-200 dark:border-rose-800',
+          WARM: 'bg-amber-50 text-amber-700 dark:bg-amber-950/50 dark:text-amber-300 border-amber-200 dark:border-amber-800',
+          COOL: 'bg-blue-50 text-blue-700 dark:bg-blue-950/50 dark:text-blue-300 border-blue-200 dark:border-blue-800',
+          DORMANT: 'bg-neutral-100 text-neutral-600 dark:bg-neutral-800 dark:text-neutral-400 border-neutral-200 dark:border-neutral-700'
+        };
+
+        return (
+          <div className="px-4 py-2.5 bg-neutral-50 dark:bg-neutral-800/40 border-b border-neutral-200 dark:border-neutral-800 flex items-center justify-between text-xs">
+            <div className="flex items-center gap-2">
+              <div className="flex items-center gap-1 font-bold text-neutral-800 dark:text-neutral-200">
+                <Flame className="w-3.5 h-3.5 text-amber-500" />
+                <span>360° Engagement Score:</span>
+              </div>
+              <span className="font-mono font-bold text-neutral-900 dark:text-white text-xs">
+                {p360.engagementScore}/100
+              </span>
+              <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold border ${tierColors[p360.engagementTier]}`}>
+                {p360.engagementTier}
+              </span>
+            </div>
+
+            <div className="text-[11px] text-neutral-500 font-mono">
+              <span>{p360.totalTouchpoints} Touchpoints Logged</span>
+            </div>
+          </div>
+        );
+      })()}
 
       {/* Tabs */}
       <div className="flex border-b border-neutral-200 dark:border-neutral-800 px-4 text-xs font-medium">
@@ -334,10 +370,31 @@ export const ContactDrawer: React.FC<ContactDrawerProps> = ({
             </div>
 
             <div className="relative pl-6 space-y-5 before:absolute before:left-2 before:top-2 before:bottom-2 before:w-0.5 before:bg-neutral-200 dark:before:bg-neutral-800">
-              {timeline.length === 0 ? (
-                <div className="text-xs text-neutral-400 py-4">No timeline events recorded.</div>
-              ) : (
-                timeline.map((event) => (
+              {(() => {
+                const p360 = Contact360Service.get360Profile(contact);
+                const displayEvents = timeline.length > 0 ? timeline.map(e => ({
+                  id: e.id,
+                  type: e.eventType,
+                  title: e.eventType.replace(/_/g, ' '),
+                  description: e.description,
+                  actor: e.actor,
+                  timestamp: e.createdAt,
+                  campaignName: e.campaignName
+                })) : p360.timeline.map(e => ({
+                  id: e.id,
+                  type: e.type,
+                  title: e.title,
+                  description: e.description,
+                  actor: e.actor,
+                  timestamp: e.timestamp,
+                  campaignName: undefined
+                }));
+
+                if (displayEvents.length === 0) {
+                  return <div className="text-xs text-neutral-400 py-4">No timeline events recorded.</div>;
+                }
+
+                return displayEvents.map((event) => (
                   <div key={event.id} className="relative group">
                     {/* Dot */}
                     <div className="absolute -left-6 top-1 w-3 h-3 rounded-full border-2 border-white dark:border-neutral-900 bg-neutral-900 dark:bg-neutral-100" />
@@ -345,10 +402,10 @@ export const ContactDrawer: React.FC<ContactDrawerProps> = ({
                     <div className="space-y-0.5">
                       <div className="flex items-center justify-between text-xs">
                         <span className="font-semibold text-neutral-900 dark:text-neutral-100">
-                          {event.eventType.replace(/_/g, ' ')}
+                          {event.title}
                         </span>
                         <span className="text-[10px] text-neutral-400 font-mono">
-                          {new Date(event.createdAt).toLocaleDateString()} {new Date(event.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                          {new Date(event.timestamp).toLocaleDateString()} {new Date(event.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                         </span>
                       </div>
 
@@ -357,7 +414,7 @@ export const ContactDrawer: React.FC<ContactDrawerProps> = ({
                       </p>
 
                       <div className="flex items-center gap-2 text-[10px] text-neutral-400">
-                        <span>By: {event.actor}</span>
+                        <span>Actor: {event.actor}</span>
                         {event.campaignName && (
                           <>
                             <span>•</span>
@@ -367,8 +424,8 @@ export const ContactDrawer: React.FC<ContactDrawerProps> = ({
                       </div>
                     </div>
                   </div>
-                ))
-              )}
+                ));
+              })()}
             </div>
           </div>
         )}

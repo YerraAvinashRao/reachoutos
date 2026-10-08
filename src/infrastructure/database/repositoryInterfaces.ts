@@ -20,6 +20,8 @@ export interface IContactRepository {
   bulkCreate(contacts: Array<Omit<Contact, 'id' | 'createdAt' | 'updatedAt'>>): Promise<{ created: number; updated: number; skipped: number }>;
   addTimelineEvent(event: Omit<TimelineEvent, 'id' | 'createdAt'>): Promise<TimelineEvent>;
   getTimeline(contactId: string): Promise<TimelineEvent[]>;
+  mergeContacts?(primaryId: string, duplicateId: string, overrides: Partial<Contact>, tenantId: string): Promise<Contact>;
+  findDuplicateCandidates?(tenantId: string): Promise<any[]>;
 }
 
 export interface ICampaignRepository {
@@ -75,5 +77,29 @@ export interface IAdminRepository {
   addGlobalBlock(tenantId: string, identifier: string, reason: string, actor: User): Promise<any>;
   removeGlobalBlock(tenantId: string, contactId: string, actor: User): Promise<void>;
   getSystemHealth(tenantId: string): Promise<any>;
+}
+
+export interface ICadenceRepository {
+  findAll(tenantId: string): Promise<any[]>;
+  findById(id: string, tenantId: string): Promise<any | null>;
+  create(data: any): Promise<any>;
+  update(id: string, updates: any, tenantId: string): Promise<any>;
+  delete(id: string, tenantId: string): Promise<void>;
+  enrollContacts(cadenceId: string, contactIds: string[], tenantId: string): Promise<number>;
+  getDueToday(tenantId: string): Promise<any[]>;
+  advanceStep(enrollmentId: string, operatorName: string, tenantId: string): Promise<any>;
+  autoExitOnReply(contactPhone: string, tenantId?: string): Promise<number>;
+}
+
+export interface ICannedResponseRepository {
+  findAll(tenantId: string): Promise<any[]>;
+  create(data: any): Promise<any>;
+  delete(id: string, tenantId: string): Promise<void>;
+}
+
+export interface IInboxRepository {
+  getThreads(tenantId: string): Promise<any[]>;
+  getThreadMessages(contactId: string, tenantId: string): Promise<any[]>;
+  recordOutbound(data: { tenantId: string; contactId: string; channel: string; body: string; operatorName: string }): Promise<any>;
 }
 

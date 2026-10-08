@@ -20,16 +20,29 @@ import {
   RefreshCw,
   Clock,
   ShieldCheck,
-  BookOpen
+  BookOpen,
+  Sparkles,
+  RotateCcw,
+  Zap,
+  Briefcase,
+  TrendingUp,
+  Languages,
+  Loader2,
+  Edit3
 } from 'lucide-react';
-import { Campaign, CampaignRecipient, Contact, Role } from '../types';
+import { Campaign, CampaignRecipient, Contact, Role, MessageTemplate } from '../types';
 import { PolicyEngine } from '../compliance/PolicyEngine';
 import { ComplianceDecision } from '../compliance/ComplianceDecision';
+import { DataQualityEngine } from '../core/validation/dataQuality';
+import { apiClient } from '../services/apiClient';
+import { PacingQualityService } from '../core/compliance/PacingQualityService';
+import { MultiChannelFallbackService } from '../core/channels/MultiChannelFallbackService';
 
 interface ManualSendingWorkspaceProps {
   campaign: Campaign;
   recipients: CampaignRecipient[];
   contacts: Contact[];
+  templates?: MessageTemplate[];
   onBack: () => void;
   onPrepare: (recipientId: string) => Promise<any>;
   onMarkSent: (recipientId: string) => Promise<any>;
@@ -44,6 +57,7 @@ export const ManualSendingWorkspace: React.FC<ManualSendingWorkspaceProps> = ({
   campaign,
   recipients,
   contacts,
+  templates = [],
   onBack,
   onPrepare,
   onMarkSent,
@@ -64,6 +78,13 @@ export const ManualSendingWorkspace: React.FC<ManualSendingWorkspaceProps> = ({
   const [loadingAction, setLoadingAction] = useState(false);
   const [lastOpenedAt, setLastOpenedAt] = useState<string | null>(null);
 
+  // AI Rephrase & Custom In-Memory Message Overrides
+  const [recipientOverrides, setRecipientOverrides] = useState<Record<string, string>>({});
+  const [isRewriting, setIsRewriting] = useState(false);
+  const [activeAiMode, setActiveAiMode] = useState<string | null>(null);
+  const [isEditingInline, setIsEditingInline] = useState(false);
+  const [inlineDraft, setInlineDraft] = useState('');
+
   // Compute current index and recipient safely by ID so background updates never shift contacts
   const activeIdx = recipients.findIndex(r => r.id === selectedRecipientId);
   const currentIndex = activeIdx !== -1 ? activeIdx : 0;
@@ -74,13 +95,66 @@ export const ManualSendingWorkspace: React.FC<ManualSendingWorkspaceProps> = ({
   const isOpened = currentRecipient?.status === 'OPENED';
   const isSuppressed = currentRecipient?.status === 'BLOCKED' || currentRecipient?.status === 'OPTED_OUT' || currentContact?.isGloballyBlocked;
 
-  // Authoritative Meta WhatsApp Policy Evaluation
+  // Helper to dynamically get the most up-to-date message for a recipient
+  const getActiveMessage = useCallback((r?: CampaignRecipient | null): string => {
+    if (!r) return '';
+    // 0. If this specific recipient has an AI rewrite or manual override in memory, use it!
+    if (recipientOverrides[r.id] !== undefined) {
+      return recipientOverrides[r.id];
+    }
+    // 1. Authoritatively resolve against live template in state if available
+    const liveTemplate = templates?.find(t => t.id === campaign.templateId || t.name === campaign.templateSnapshot?.name);
+    const effectiveBody = liveTemplate?.body || campaign?.templateSnapshot?.body;
+
+    if (effectiveBody) {
+      const contact = contacts.find(c => c.id === r.contactId);
+      const contactData: Record<string, string> = {
+        first_name: contact?.firstName || '',
+        last_name: contact?.lastName || '',
+        name: contact?.displayName || r.contactName || '',
+        company_name: contact?.companyName || r.companyName || '',
+        company: contact?.companyName || r.companyName || '',
+        city: contact?.city || '',
+        state: contact?.state || '',
+        phone: contact?.phone || r.channelAddress || '',
+        email: contact?.email || r.channelAddress || '',
+        ...(contact?.customFields || {})
+      };
+      return DataQualityEngine.resolveTemplateVariables(effectiveBody, contactData).resolved;
+    }
+    return r.resolvedMessage || '';
+  }, [campaign, templates, contacts, recipientOverrides]);
+
+  const getActiveSubject = useCallback((r?: CampaignRecipient | null): string | undefined => {
+    if (!r) return undefined;
+    const liveTemplate = templates?.find(t => t.id === campaign.templateId || t.name === campaign.templateSnapshot?.name);
+    const effectiveSubject = liveTemplate?.subject || campaign?.templateSnapshot?.subject;
+
+    if (effectiveSubject) {
+      const contact = contacts.find(c => c.id === r.contactId);
+      const contactData: Record<string, string> = {
+        first_name: contact?.firstName || '',
+        last_name: contact?.lastName || '',
+        name: contact?.displayName || r.contactName || '',
+        company_name: contact?.companyName || r.companyName || '',
+        company: contact?.companyName || r.companyName || '',
+        city: contact?.city || '',
+        state: contact?.state || '',
+        phone: contact?.phone || r.channelAddress || '',
+        email: contact?.email || r.channelAddress || '',
+        ...(contact?.customFields || {})
+      };
+      return DataQualityEngine.resolveTemplateVariables(effectiveSubject, contactData).resolved;
+    }
+    return r.resolvedSubject;
+  }, [campaign, templates, contacts]);
+
+  // Evaluate Meta WhatsApp Compliance in real time for currently selected recipient
   const complianceDecision: ComplianceDecision = React.useMemo(() => {
     if (!currentRecipient) {
       return {
         decision: 'ALLOW',
-        confidence: 1,
-        riskLevel: 'LOW',
+        reason: 'No recipient selected',
         violations: [],
         evaluatedRules: [],
         requiredActions: [],
@@ -97,7 +171,7 @@ export const ManualSendingWorkspace: React.FC<ManualSendingWorkspaceProps> = ({
       contactName: currentRecipient.contactName || currentContact?.displayName,
       channel: currentRecipient.channel,
       isMarketing: true,
-      messageBody: currentRecipient.resolvedMessage || campaign.templateSnapshot.body,
+      messageBody: getActiveMessage(currentRecipient) || campaign.templateSnapshot?.body || '',
       templateId: campaign.templateId,
       templateName: campaign.templateSnapshot?.name,
       templateCategory: (campaign.templateSnapshot as any)?.category || 'MARKETING',
@@ -107,13 +181,56 @@ export const ManualSendingWorkspace: React.FC<ManualSendingWorkspaceProps> = ({
       actorRole: userRole,
       lastInboundMessageAt: currentContact?.lastInteractionAt
     });
-  }, [currentRecipient, currentContact, campaign, isSuppressed, userRole]);
+  }, [currentRecipient, currentContact, campaign, isSuppressed, userRole, getActiveMessage]);
 
   // Completed metrics
   const total = recipients.length;
   const sentCount = recipients.filter(r => r.status === 'USER_SENT').length;
   const skippedCount = recipients.filter(r => r.status === 'SKIPPED').length;
+  const blockedCount = recipients.filter(r => r.status === 'BLOCKED').length;
+  const optOutCount = recipients.filter(r => r.status === 'OPTED_OUT').length;
   const progressPct = Math.round((sentCount / (total || 1)) * 100);
+
+  // Pacing Timer state (Anti-Spam velocity guard)
+  const [pacingTimer, setPacingTimer] = useState<number>(0);
+  const [fallbackMessage, setFallbackMessage] = useState<string | null>(null);
+
+  // Calculate Meta Phone Number Health & Pacing metrics
+  const qualityMetrics = React.useMemo(() => {
+    return PacingQualityService.calculateQualityMetrics({
+      totalSent24h: sentCount,
+      blockedCount24h: blockedCount,
+      optOutCount24h: optOutCount
+    });
+  }, [sentCount, blockedCount, optOutCount]);
+
+  // Decrement pacing timer countdown
+  useEffect(() => {
+    if (pacingTimer > 0) {
+      const interval = setInterval(() => {
+        setPacingTimer(prev => Math.max(0, prev - 1));
+      }, 1000);
+      return () => clearInterval(interval);
+    }
+  }, [pacingTimer]);
+
+  const handleEmailFallback = () => {
+    if (!currentContact || !currentRecipient) return;
+    const fallback = MultiChannelFallbackService.generateEmailFallback({
+      contact: currentContact,
+      whatsappMessageBody: getActiveMessage(currentRecipient),
+      campaignName: campaign.name
+    });
+
+    if (!fallback.canSendEmail) {
+      alert(fallback.blockReason || 'Cannot send email fallback');
+      return;
+    }
+
+    window.open(fallback.mailtoUrl, '_blank', 'noopener,noreferrer');
+    setFallbackMessage(`✓ Email composer launched for ${fallback.recipientEmail}`);
+    setTimeout(() => setFallbackMessage(null), 5000);
+  };
 
   // Queue navigation functions
   const advanceToNext = useCallback(() => {
@@ -136,13 +253,15 @@ export const ManualSendingWorkspace: React.FC<ManualSendingWorkspaceProps> = ({
   const getDeepLinkUrl = useCallback((r?: CampaignRecipient | null) => {
     if (!r) return '';
     const phoneDigits = (r.channelAddress || '').replace(/\D/g, '');
-    const encodedBody = encodeURIComponent(r.resolvedMessage || '');
+    const activeMsg = getActiveMessage(r);
+    const encodedBody = encodeURIComponent(activeMsg);
     if (campaign.channel === 'WHATSAPP') {
       return `https://wa.me/${phoneDigits}?text=${encodedBody}`;
     }
-    const encodedSubject = encodeURIComponent(r.resolvedSubject || '');
+    const activeSub = getActiveSubject(r) || '';
+    const encodedSubject = encodeURIComponent(activeSub);
     return `mailto:${r.channelAddress}?subject=${encodedSubject}&body=${encodedBody}`;
-  }, [campaign.channel]);
+  }, [campaign.channel, getActiveMessage, getActiveSubject]);
 
   // Trigger Open Composer (Opening does NOT mark sent and does NOT advance)
   const handleOpenChannel = useCallback(async () => {
@@ -221,9 +340,56 @@ export const ManualSendingWorkspace: React.FC<ManualSendingWorkspaceProps> = ({
   // Copy message
   const handleCopyMessage = () => {
     if (!currentRecipient) return;
-    navigator.clipboard.writeText(currentRecipient.resolvedMessage);
+    const msg = getActiveMessage(currentRecipient);
+    navigator.clipboard.writeText(msg);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
+  };
+
+  // AI Rephraser Handler
+  const handleAiRewrite = async (mode: 'shorten' | 'persuasive' | 'professional' | 'telugu' | 'hindi' | 'hinglish') => {
+    if (!currentRecipient || isRewriting) return;
+    setIsRewriting(true);
+    setActiveAiMode(mode);
+    try {
+      const currentMsg = getActiveMessage(currentRecipient);
+      const res = await apiClient.aiRewrite({
+        message: currentMsg,
+        mode
+      });
+      if (res?.rewritten) {
+        setRecipientOverrides(prev => ({
+          ...prev,
+          [currentRecipient.id]: res.rewritten
+        }));
+      }
+    } catch (err: any) {
+      console.error('AI Rewrite error:', err);
+    } finally {
+      setIsRewriting(false);
+    }
+  };
+
+  // Reset to Base Template
+  const handleResetToOriginal = () => {
+    if (!currentRecipient) return;
+    setRecipientOverrides(prev => {
+      const next = { ...prev };
+      delete next[currentRecipient.id];
+      return next;
+    });
+    setActiveAiMode(null);
+    setIsEditingInline(false);
+  };
+
+  // Save manual inline edits
+  const handleSaveInlineEdit = () => {
+    if (!currentRecipient) return;
+    setRecipientOverrides(prev => ({
+      ...prev,
+      [currentRecipient.id]: inlineDraft
+    }));
+    setIsEditingInline(false);
   };
 
   // Keyboard navigation listener (W, E, S, K, B, N, P, C)
@@ -387,6 +553,23 @@ export const ManualSendingWorkspace: React.FC<ManualSendingWorkspaceProps> = ({
                     : 'Meta Policy Blocked'}
                 </span>
               </button>
+
+              {/* Meta Phone Number Quality Health Indicator */}
+              <div 
+                className={`px-2.5 py-0.5 rounded-full text-[11px] font-mono font-bold flex items-center gap-1.5 border shadow-2xs ${
+                  qualityMetrics.status === 'GREEN'
+                    ? 'bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-400 border-emerald-300 dark:border-emerald-800'
+                    : qualityMetrics.status === 'YELLOW'
+                    ? 'bg-amber-50 dark:bg-amber-950/40 text-amber-700 dark:text-amber-400 border-amber-300 dark:border-amber-800'
+                    : 'bg-rose-50 dark:bg-rose-950/40 text-rose-700 dark:text-rose-400 border-rose-300 dark:border-rose-800 animate-pulse'
+                }`}
+                title={`Meta WhatsApp Phone Reputation Score: ${qualityMetrics.qualityScore}/100. Pacing Delay: ${qualityMetrics.recommendedDelaySeconds}s`}
+              >
+                <span className={`w-2 h-2 rounded-full ${
+                  qualityMetrics.status === 'GREEN' ? 'bg-emerald-500' : qualityMetrics.status === 'YELLOW' ? 'bg-amber-500' : 'bg-rose-500'
+                }`} />
+                <span>Meta Health: {qualityMetrics.qualityScore}% ({qualityMetrics.status})</span>
+              </div>
             </div>
 
             <div className="flex flex-wrap items-center gap-3 text-xs text-neutral-500">
@@ -472,24 +655,196 @@ export const ManualSendingWorkspace: React.FC<ManualSendingWorkspaceProps> = ({
           </div>
         )}
 
-        {/* Message Preview Box */}
-        <div className="space-y-1.5">
-          <div className="flex items-center justify-between text-xs">
-            <span className="font-semibold text-neutral-500 uppercase tracking-wider text-[11px]">
-              Personalized Message Preview
-            </span>
+        {/* Message Preview & AI Rephraser Box */}
+        <div className="space-y-2.5">
+          <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
+            <div className="flex items-center gap-2">
+              <span className="font-semibold text-neutral-500 uppercase tracking-wider text-[11px]">
+                Personalized Message
+              </span>
+              {recipientOverrides[currentRecipient.id] !== undefined && (
+                <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-indigo-50 dark:bg-indigo-950/60 text-indigo-700 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800/80 flex items-center gap-1 shadow-xs animate-in fade-in duration-200">
+                  <Sparkles className="w-2.5 h-2.5 text-indigo-500" />
+                  <span>AI Adapted {activeAiMode ? `(${activeAiMode})` : ''}</span>
+                </span>
+              )}
+            </div>
+
+            <div className="flex items-center gap-2">
+              {recipientOverrides[currentRecipient.id] !== undefined && (
+                <button
+                  onClick={handleResetToOriginal}
+                  className="flex items-center gap-1 text-[11px] text-amber-600 dark:text-amber-400 hover:text-amber-700 dark:hover:text-amber-300 font-medium transition cursor-pointer"
+                  title="Revert to base template copy"
+                >
+                  <RotateCcw className="w-3 h-3" />
+                  <span>Reset to Original</span>
+                </button>
+              )}
+
+              <button
+                onClick={() => {
+                  if (isEditingInline) {
+                    setIsEditingInline(false);
+                  } else {
+                    setInlineDraft(getActiveMessage(currentRecipient));
+                    setIsEditingInline(true);
+                  }
+                }}
+                className="flex items-center gap-1 text-[11px] text-neutral-500 hover:text-neutral-900 dark:hover:text-neutral-100 font-medium transition cursor-pointer"
+              >
+                <Edit3 className="w-3 h-3" />
+                <span>{isEditingInline ? 'Cancel Edit' : 'Edit Text'}</span>
+              </button>
+
+              <button
+                onClick={handleCopyMessage}
+                className="flex items-center gap-1 text-[11px] text-neutral-500 hover:text-neutral-900 dark:hover:text-neutral-100 font-medium transition cursor-pointer"
+              >
+                {copied ? <Check className="w-3 h-3 text-emerald-600" /> : <Copy className="w-3 h-3" />}
+                <span>{copied ? 'Copied' : 'Copy (C)'}</span>
+              </button>
+            </div>
+          </div>
+
+          {/* AI Quick Rephrase Action Chips */}
+          <div className="p-2 rounded-xl bg-neutral-100/70 dark:bg-neutral-800/50 border border-neutral-200/80 dark:border-neutral-800 flex flex-wrap items-center gap-1.5 text-xs">
+            <div className="flex items-center gap-1 text-[11px] font-bold text-neutral-500 mr-1 pl-1">
+              <Sparkles className="w-3 h-3 text-indigo-500" />
+              <span>AI Tone:</span>
+            </div>
+
             <button
-              onClick={handleCopyMessage}
-              className="flex items-center gap-1 text-[11px] text-neutral-500 hover:text-neutral-900 dark:hover:text-neutral-100 font-medium transition"
+              onClick={() => handleAiRewrite('shorten')}
+              disabled={isRewriting || userRole === 'VIEWER'}
+              className={`px-2.5 py-1 rounded-lg font-medium text-[11px] transition flex items-center gap-1 cursor-pointer disabled:opacity-50 ${
+                activeAiMode === 'shorten' && recipientOverrides[currentRecipient.id]
+                  ? 'bg-indigo-600 text-white shadow-xs'
+                  : 'bg-white dark:bg-neutral-900 text-neutral-700 dark:text-neutral-300 border border-neutral-200 dark:border-neutral-700 hover:border-indigo-300 dark:hover:border-indigo-600'
+              }`}
             >
-              {copied ? <Check className="w-3 h-3 text-emerald-600" /> : <Copy className="w-3 h-3" />}
-              <span>{copied ? 'Copied to clipboard' : 'Copy text (C)'}</span>
+              {isRewriting && activeAiMode === 'shorten' ? <Loader2 className="w-3 h-3 animate-spin" /> : <Zap className="w-3 h-3 text-amber-500" />}
+              <span>Shorten (&lt;50w)</span>
+            </button>
+
+            <button
+              onClick={() => handleAiRewrite('professional')}
+              disabled={isRewriting || userRole === 'VIEWER'}
+              className={`px-2.5 py-1 rounded-lg font-medium text-[11px] transition flex items-center gap-1 cursor-pointer disabled:opacity-50 ${
+                activeAiMode === 'professional' && recipientOverrides[currentRecipient.id]
+                  ? 'bg-indigo-600 text-white shadow-xs'
+                  : 'bg-white dark:bg-neutral-900 text-neutral-700 dark:text-neutral-300 border border-neutral-200 dark:border-neutral-700 hover:border-indigo-300 dark:hover:border-indigo-600'
+              }`}
+            >
+              {isRewriting && activeAiMode === 'professional' ? <Loader2 className="w-3 h-3 animate-spin" /> : <Briefcase className="w-3 h-3 text-blue-500" />}
+              <span>Professional B2B</span>
+            </button>
+
+            <button
+              onClick={() => handleAiRewrite('persuasive')}
+              disabled={isRewriting || userRole === 'VIEWER'}
+              className={`px-2.5 py-1 rounded-lg font-medium text-[11px] transition flex items-center gap-1 cursor-pointer disabled:opacity-50 ${
+                activeAiMode === 'persuasive' && recipientOverrides[currentRecipient.id]
+                  ? 'bg-indigo-600 text-white shadow-xs'
+                  : 'bg-white dark:bg-neutral-900 text-neutral-700 dark:text-neutral-300 border border-neutral-200 dark:border-neutral-700 hover:border-indigo-300 dark:hover:border-indigo-600'
+              }`}
+            >
+              {isRewriting && activeAiMode === 'persuasive' ? <Loader2 className="w-3 h-3 animate-spin" /> : <TrendingUp className="w-3 h-3 text-emerald-500" />}
+              <span>Margin / Value Hook</span>
+            </button>
+
+            <div className="h-4 w-[1px] bg-neutral-300 dark:bg-neutral-700 mx-0.5 hidden sm:block" />
+
+            <button
+              onClick={() => handleAiRewrite('telugu')}
+              disabled={isRewriting || userRole === 'VIEWER'}
+              className={`px-2 py-1 rounded-lg font-medium text-[11px] transition flex items-center gap-1 cursor-pointer disabled:opacity-50 ${
+                activeAiMode === 'telugu' && recipientOverrides[currentRecipient.id]
+                  ? 'bg-indigo-600 text-white shadow-xs'
+                  : 'bg-white dark:bg-neutral-900 text-neutral-700 dark:text-neutral-300 border border-neutral-200 dark:border-neutral-700 hover:border-indigo-300'
+              }`}
+              title="Translate to Business Telugu"
+            >
+              {isRewriting && activeAiMode === 'telugu' ? <Loader2 className="w-3 h-3 animate-spin" /> : <Languages className="w-3 h-3 text-indigo-500" />}
+              <span>తెలుగు (Telugu)</span>
+            </button>
+
+            <button
+              onClick={() => handleAiRewrite('hindi')}
+              disabled={isRewriting || userRole === 'VIEWER'}
+              className={`px-2 py-1 rounded-lg font-medium text-[11px] transition flex items-center gap-1 cursor-pointer disabled:opacity-50 ${
+                activeAiMode === 'hindi' && recipientOverrides[currentRecipient.id]
+                  ? 'bg-indigo-600 text-white shadow-xs'
+                  : 'bg-white dark:bg-neutral-900 text-neutral-700 dark:text-neutral-300 border border-neutral-200 dark:border-neutral-700 hover:border-indigo-300'
+              }`}
+              title="Translate to Business Hindi"
+            >
+              {isRewriting && activeAiMode === 'hindi' ? <Loader2 className="w-3 h-3 animate-spin" /> : <Languages className="w-3 h-3 text-orange-500" />}
+              <span>हिंदी (Hindi)</span>
+            </button>
+
+            <button
+              onClick={() => handleAiRewrite('hinglish')}
+              disabled={isRewriting || userRole === 'VIEWER'}
+              className={`px-2 py-1 rounded-lg font-medium text-[11px] transition flex items-center gap-1 cursor-pointer disabled:opacity-50 ${
+                activeAiMode === 'hinglish' && recipientOverrides[currentRecipient.id]
+                  ? 'bg-indigo-600 text-white shadow-xs'
+                  : 'bg-white dark:bg-neutral-900 text-neutral-700 dark:text-neutral-300 border border-neutral-200 dark:border-neutral-700 hover:border-indigo-300'
+              }`}
+              title="Conversational Hinglish"
+            >
+              {isRewriting && activeAiMode === 'hinglish' ? <Loader2 className="w-3 h-3 animate-spin" /> : <Languages className="w-3 h-3 text-teal-500" />}
+              <span>Hinglish</span>
             </button>
           </div>
 
-          <div className="p-4 rounded-xl border border-neutral-200 dark:border-neutral-800 bg-neutral-50/80 dark:bg-neutral-800/40 text-neutral-900 dark:text-neutral-100 whitespace-pre-line text-sm font-sans leading-relaxed select-text shadow-inner">
-            {currentRecipient.resolvedMessage}
-          </div>
+          {/* Editable Textarea or Live Preview Display */}
+          {isEditingInline ? (
+            <div className="space-y-2">
+              <textarea
+                value={inlineDraft}
+                onChange={(e) => setInlineDraft(e.target.value)}
+                rows={5}
+                className="w-full p-3.5 rounded-xl border border-indigo-300 dark:border-indigo-700 bg-white dark:bg-neutral-950 text-neutral-900 dark:text-neutral-100 text-sm font-sans leading-relaxed focus:outline-none focus:ring-2 focus:ring-indigo-500 shadow-inner resize-y"
+                placeholder="Type customized outreach message for this recipient..."
+              />
+              <div className="flex items-center justify-between">
+                <span className="text-[11px] font-mono text-neutral-400">
+                  {inlineDraft.length} chars • {inlineDraft.trim().split(/\s+/).filter(Boolean).length} words
+                </span>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => setIsEditingInline(false)}
+                    className="px-3 py-1 rounded-lg text-xs font-semibold text-neutral-500 hover:bg-neutral-100 dark:hover:bg-neutral-800 transition cursor-pointer"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={handleSaveInlineEdit}
+                    className="px-3.5 py-1 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-semibold shadow-xs transition cursor-pointer"
+                  >
+                    Save Custom Copy
+                  </button>
+                </div>
+              </div>
+            </div>
+          ) : (
+            <div className={`p-4 rounded-xl border transition duration-200 ${
+              isRewriting 
+                ? 'border-indigo-300 dark:border-indigo-800 bg-indigo-50/30 dark:bg-indigo-950/20 animate-pulse' 
+                : recipientOverrides[currentRecipient.id] !== undefined
+                ? 'border-indigo-200 dark:border-indigo-900/60 bg-indigo-50/20 dark:bg-neutral-850'
+                : 'border-neutral-200 dark:border-neutral-800 bg-neutral-50/80 dark:bg-neutral-800/40'
+            } text-neutral-900 dark:text-neutral-100 whitespace-pre-line text-sm font-sans leading-relaxed select-text shadow-inner relative`}>
+              {getActiveMessage(currentRecipient)}
+              <div className="mt-3 pt-2.5 border-t border-neutral-200/60 dark:border-neutral-800/60 flex items-center justify-between text-[10px] font-mono text-neutral-400">
+                <span>
+                  {getActiveMessage(currentRecipient).length} chars • {getActiveMessage(currentRecipient).trim().split(/\s+/).filter(Boolean).length} words • ~{Math.max(3, Math.ceil(getActiveMessage(currentRecipient).trim().split(/\s+/).filter(Boolean).length / 3.5))}s read time
+                </span>
+                <span>Deep link auto-synchronized</span>
+              </div>
+            </div>
+          )}
         </div>
 
         {/* Human-in-the-Loop Status & Timestamp Indicator */}
@@ -511,6 +866,13 @@ export const ManualSendingWorkspace: React.FC<ManualSendingWorkspaceProps> = ({
             </button>
           )}
         </div>
+
+        {fallbackMessage && (
+          <div className="p-2.5 rounded-lg bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-800 text-emerald-800 dark:text-emerald-300 text-xs font-semibold flex items-center gap-2">
+            <CheckCircle2 className="w-4 h-4 text-emerald-600" />
+            <span>{fallbackMessage}</span>
+          </div>
+        )}
 
         {/* Primary Action Buttons */}
         <div className="pt-3 border-t border-neutral-100 dark:border-neutral-800 space-y-3">
@@ -558,8 +920,8 @@ export const ManualSendingWorkspace: React.FC<ManualSendingWorkspaceProps> = ({
             </button>
           </div>
 
-          {/* Secondary Control Row: Navigation + Skip/Block */}
-          <div className="flex items-center justify-between gap-2 pt-1">
+          {/* Secondary Control Row: Navigation + Fallback + Skip/Block */}
+          <div className="flex flex-wrap items-center justify-between gap-2 pt-1">
             {/* Prev / Next */}
             <div className="flex items-center gap-1.5">
               <button
@@ -579,6 +941,18 @@ export const ManualSendingWorkspace: React.FC<ManualSendingWorkspaceProps> = ({
                 Next →
               </button>
             </div>
+
+            {/* Multi-Channel Smart Email Fallback */}
+            {currentContact?.email && currentRecipient.channel === 'WHATSAPP' && (
+              <button
+                onClick={handleEmailFallback}
+                className="px-3 py-2 rounded-lg border border-blue-200 dark:border-blue-800 bg-blue-50 dark:bg-blue-950/30 text-xs font-semibold text-blue-700 dark:text-blue-300 hover:bg-blue-100 dark:hover:bg-blue-900/40 flex items-center gap-1.5 transition cursor-pointer shadow-2xs"
+                title={`Launch Email Fallback for ${currentContact.email}`}
+              >
+                <Mail className="w-3.5 h-3.5 text-blue-500" />
+                <span>Email Fallback ({currentContact.email.split('@')[0]})</span>
+              </button>
+            )}
 
             {/* Skip & Block */}
             <div className="flex items-center gap-1.5">

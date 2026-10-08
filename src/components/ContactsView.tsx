@@ -8,19 +8,23 @@ import {
   ShieldAlert, 
   ArrowUpDown, 
   Building, 
-  ChevronRight,
-  Users,
-  CheckSquare,
-  Check,
-  FolderPlus,
-  Loader2,
-  Filter,
-  Sparkles,
-  Trash2
+  ChevronRight, 
+  Users, 
+  CheckSquare, 
+  Check, 
+  FolderPlus, 
+  Loader2, 
+  Filter, 
+  Sparkles, 
+  Trash2, 
+  Download,
+  GitMerge
 } from 'lucide-react';
 import { Contact, Role, ContactList } from '../types';
 import { DataQualityEngine } from '../core/validation/dataQuality';
 import { CreateSegmentModal } from './CreateSegmentModal';
+import { DeduplicationStudioModal } from './DeduplicationStudioModal';
+import { exportContactsToCsv } from '../utils/exportService';
 
 export const SEGMENT_CONFIGS: Record<string, { label: string; bg: string; text: string; border: string; activeTab: string }> = {
   FAMILY: {
@@ -125,6 +129,7 @@ export const ContactsView: React.FC<ContactsViewProps> = ({
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('asc');
   const [showAddModal, setShowAddModal] = useState(false);
   const [showSegmentModal, setShowSegmentModal] = useState(false);
+  const [showDeduplicationModal, setShowDeduplicationModal] = useState(false);
 
   // Multi-selection state
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
@@ -298,8 +303,29 @@ export const ContactsView: React.FC<ContactsViewProps> = ({
         </div>
 
         <div className="flex items-center gap-2">
+          <button
+            onClick={() => {
+              const filename = `reachout_contacts_${activeSegment !== 'ALL' ? activeSegment.toLowerCase() + '_' : ''}${Date.now()}.csv`;
+              exportContactsToCsv(sortedContacts, filename);
+            }}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-md border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-800 text-neutral-800 dark:text-neutral-200 text-xs font-semibold hover:bg-neutral-50 dark:hover:bg-neutral-700 transition shadow-sm cursor-pointer"
+            title="Export filtered or all contacts as CSV"
+          >
+            <Download className="w-3.5 h-3.5 text-neutral-500" />
+            <span>Export ({sortedContacts.length})</span>
+          </button>
+
           {userRole !== 'VIEWER' && (
             <>
+              <button
+                onClick={() => setShowDeduplicationModal(true)}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-md border border-indigo-200 dark:border-indigo-800 bg-indigo-50 dark:bg-indigo-950/40 text-indigo-700 dark:text-indigo-300 text-xs font-semibold hover:bg-indigo-100 dark:hover:bg-indigo-900/40 transition shadow-sm cursor-pointer"
+                title="Scan and merge duplicate contacts"
+              >
+                <GitMerge className="w-3.5 h-3.5 text-indigo-600 dark:text-indigo-400" />
+                <span>Deduplication Studio</span>
+              </button>
+
               <button
                 onClick={() => setShowSegmentModal(true)}
                 className="flex items-center gap-1.5 px-3 py-1.5 rounded-md border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-800 text-neutral-800 dark:text-neutral-200 text-xs font-semibold hover:bg-neutral-50 dark:hover:bg-neutral-700 transition shadow-sm"
@@ -1047,6 +1073,16 @@ export const ContactsView: React.FC<ContactsViewProps> = ({
           setBulkSuccessMsg(`✓ Successfully created segment & list "${data.name}" with ${data.contactIds.length} contacts!`);
           setTimeout(() => setBulkSuccessMsg(null), 5000);
           setShowSegmentModal(false);
+        }}
+      />
+
+      {/* Deduplication & Merge Studio Modal */}
+      <DeduplicationStudioModal
+        isOpen={showDeduplicationModal}
+        onClose={() => setShowDeduplicationModal(false)}
+        onMergedSuccess={() => {
+          // Re-fetch contacts or trigger refresh
+          window.location.reload();
         }}
       />
     </div>

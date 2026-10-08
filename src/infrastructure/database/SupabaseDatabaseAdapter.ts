@@ -425,6 +425,129 @@ export class SupabaseDatabaseAdapter {
         metadata: d.metadata,
         createdAt: d.created_at
       }));
+    },
+
+    findDuplicateCandidates: async (tenantId: string) => {
+      const client = this.getClient();
+      const { data: contacts, error } = await client
+        .from('contacts')
+        .select('*')
+        .eq('tenant_id', tenantId)
+        .order('created_at', { ascending: false });
+
+      if (error) throw error;
+      if (!contacts || contacts.length < 2) return [];
+
+      const candidates: any[] = [];
+      const seenPairs = new Set<string>();
+
+      for (let i = 0; i < contacts.length; i++) {
+        const c1 = contacts[i];
+        const p1 = (c1.phone || '').replace(/\D/g, '').slice(-10);
+        const e1 = (c1.email || '').toLowerCase().trim();
+        const comp1 = (c1.company_name || '').toLowerCase().trim();
+
+        for (let j = i + 1; j < contacts.length; j++) {
+          const c2 = contacts[j];
+          const pairKey = [c1.id, c2.id].sort().join(':');
+          if (seenPairs.has(pairKey)) continue;
+
+          const p2 = (c2.phone || '').replace(/\D/g, '').slice(-10);
+          const e2 = (c2.email || '').toLowerCase().trim();
+          const comp2 = (c2.company_name || '').toLowerCase().trim();
+
+          let matchScore = 0;
+          let matchReason = '';
+
+          // Exact or 10-digit phone match
+          if (p1 && p2 && p1 === p2) {
+            matchScore = 98;
+            matchReason = `Identical Phone (${c1.phone} / ${c2.phone})`;
+          } else if (e1 && e2 && e1 === e2) {
+            matchScore = 95;
+            matchReason = `Identical Email (${e1})`;
+          } else if (comp1 && comp2 && comp1.length > 3 && comp1 === comp2) {
+            matchScore = 75;
+            matchReason = `Identical Company Name ("${c1.company_name}")`;
+          }
+
+          if (matchScore >= 70) {
+            seenPairs.add(pairKey);
+            const conflictingFields = [];
+            if (c1.display_name !== c2.display_name) {
+              conflictingFields.push({ fieldName: 'displayName', primaryValue: c1.display_name, duplicateValue: c2.display_name });
+            }
+            if (c1.company_name !== c2.company_name) {
+              conflictingFields.push({ fieldName: 'companyName', primaryValue: c1.company_name, duplicateValue: c2.company_name });
+            }
+            if (c1.phone !== c2.phone) {
+              conflictingFields.push({ fieldName: 'phone', primaryValue: c1.phone, duplicateValue: c2.phone });
+            }
+            if (c1.email !== c2.email) {
+              conflictingFields.push({ fieldName: 'email', primaryValue: c1.email, duplicateValue: c2.email });
+            }
+
+            candidates.push({
+              primaryContact: this.mapDbContactToDomain(c1),
+              duplicateContact: this.mapDbContactToDomain(c2),
+              matchReason,
+              matchScore,
+              conflictingFields
+            });
+          }
+        }
+      }
+
+      return candidates.slice(0, 30);
+    },
+
+    mergeContacts: async (primaryId: string, duplicateId: string, overrides: Partial<Contact>, tenantId: string) => {
+      const client = this.getClient();
+      const { data: primaryRow } = await client.from('contacts').select('*').eq('id', primaryId).eq('tenant_id', tenantId).single();
+      const { data: duplicateRow } = await client.from('contacts').select('*').eq('id', duplicateId).eq('tenant_id', tenantId).single();
+
+      if (!primaryRow || !duplicateRow) {
+        throw new Error('One or both contacts not found in this tenant workspace');
+      }
+
+      // 1. Combine tags
+      const combinedTags = Array.from(new Set([...(primaryRow.tags || []), ...(duplicateRow.tags || []), ...(overrides.tags || [])]));
+
+      // 2. Combine notes
+      const combinedNotes = `${primaryRow.notes || ''}\n\n[Merged duplicate ${duplicateRow.display_name} (${duplicateRow.phone}) on ${new Date().toLocaleDateString()}]:\n${duplicateRow.notes || ''}`.trim();
+
+      // 3. Update primary contact
+      const dbUpdates: Record<string, any> = {
+        updated_at: new Date().toISOString(),
+        tags: combinedTags,
+        notes: combinedNotes
+      };
+      if (overrides.displayName) dbUpdates.display_name = overrides.displayName;
+      if (overrides.companyName) dbUpdates.company_name = overrides.companyName;
+      if (overrides.phone) dbUpdates.phone = overrides.phone;
+      if (overrides.email) dbUpdates.email = overrides.email;
+      if (overrides.leadStatus) dbUpdates.lead_status = overrides.leadStatus;
+
+      const { data: updatedPrimary, error: updateErr } = await client
+        .from('contacts')
+        .update(dbUpdates)
+        .eq('id', primaryId)
+        .eq('tenant_id', tenantId)
+        .select()
+        .single();
+
+      if (updateErr) throw updateErr;
+
+      // 4. Re-link child records to primary contact
+      await client.from('contact_timeline').update({ contact_id: primaryId }).eq('contact_id', duplicateId);
+      await client.from('campaign_recipients').update({ contact_id: primaryId }).eq('contact_id', duplicateId);
+      await client.from('inbound_messages').update({ contact_id: primaryId }).eq('contact_id', duplicateId);
+
+      // 5. Delete duplicate record safely
+      await client.from('contact_list_members').delete().eq('contact_id', duplicateId);
+      await client.from('contacts').delete().eq('id', duplicateId).eq('tenant_id', tenantId);
+
+      return this.mapDbContactToDomain(updatedPrimary);
     }
   };
 
@@ -510,6 +633,16 @@ export class SupabaseDatabaseAdapter {
         updated_at: new Date().toISOString()
       };
 
+      if (updates.name !== undefined) dbUpdates.name = updates.name;
+      if (updates.description !== undefined) dbUpdates.description = updates.description;
+      if (updates.channel !== undefined) dbUpdates.channel = updates.channel;
+      if (updates.targetListId !== undefined) dbUpdates.target_list_id = updates.targetListId;
+      if (updates.targetListName !== undefined) dbUpdates.target_list_name = updates.targetListName;
+      if (updates.templateId !== undefined) dbUpdates.template_id = updates.templateId;
+      if (updates.templateVersion !== undefined) dbUpdates.template_version = updates.templateVersion;
+      if (updates.templateSnapshot !== undefined) dbUpdates.template_snapshot = updates.templateSnapshot;
+      if (updates.assignedOperator !== undefined) dbUpdates.assigned_operator = updates.assignedOperator;
+      if (updates.isDryRun !== undefined) dbUpdates.is_dry_run = updates.isDryRun;
       if (updates.status !== undefined) dbUpdates.status = updates.status;
       if (updates.approvedBy !== undefined) {
         const isUuid = typeof updates.approvedBy === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(updates.approvedBy);
@@ -1710,6 +1843,582 @@ export class SupabaseDatabaseAdapter {
         serverUptimeSeconds: Math.floor(process.uptime()),
         timestamp: new Date().toISOString()
       };
+    }
+  };
+
+  // ============================================================================
+  // CADENCES & FOLLOW-UP SEQUENCES REPOSITORY
+  // ============================================================================
+  cadencesRepo: ICadenceRepository = {
+    findAll: async (tenantId: string) => {
+      const client = this.getClient();
+      try {
+        const { data, error } = await client
+          .from('cadence_sequences')
+          .select('*, cadence_enrollments(id, status)')
+          .eq('tenant_id', tenantId)
+          .order('created_at', { ascending: false });
+
+        if (error) {
+          if (error.code === 'PGRST205' || error.message?.includes('schema cache') || error.message?.includes('does not exist')) {
+            return [];
+          }
+          throw error;
+        }
+        return (data || []).map((row: any) => ({
+          id: row.id,
+          tenantId: row.tenant_id,
+          name: row.name,
+          description: row.description,
+          channel: row.channel,
+          status: row.status,
+          steps: row.steps || [],
+          autoExitOnReply: row.auto_exit_on_reply,
+          enrolledCount: row.cadence_enrollments?.length || 0,
+          completedCount: row.cadence_enrollments?.filter((e: any) => e.status === 'COMPLETED').length || 0,
+          createdAt: row.created_at,
+          updatedAt: row.updated_at
+        }));
+      } catch (err: any) {
+        if (err?.code === 'PGRST205' || err?.message?.includes('schema cache') || err?.message?.includes('does not exist')) {
+          return [];
+        }
+        throw err;
+      }
+    },
+
+    findById: async (id: string, tenantId: string) => {
+      const client = this.getClient();
+      try {
+        const { data, error } = await client
+          .from('cadence_sequences')
+          .select('*')
+          .eq('id', id)
+          .eq('tenant_id', tenantId)
+          .maybeSingle();
+
+        if (error) {
+          if (error.code === 'PGRST205' || error.message?.includes('schema cache')) return null;
+          throw error;
+        }
+        if (!data) return null;
+        return {
+          id: data.id,
+          tenantId: data.tenant_id,
+          name: data.name,
+          description: data.description,
+          channel: data.channel,
+          status: data.status,
+          steps: data.steps || [],
+          autoExitOnReply: data.auto_exit_on_reply,
+          createdAt: data.created_at,
+          updatedAt: data.updated_at
+        };
+      } catch {
+        return null;
+      }
+    },
+
+    create: async (payload: any) => {
+      const client = this.getClient();
+      try {
+        const { data, error } = await client
+          .from('cadence_sequences')
+          .insert({
+            tenant_id: payload.tenantId,
+            name: payload.name,
+            description: payload.description || '',
+            channel: payload.channel || 'WHATSAPP',
+            status: payload.status || 'ACTIVE',
+            steps: payload.steps || [],
+            auto_exit_on_reply: payload.autoExitOnReply !== false
+          })
+          .select()
+          .single();
+
+        if (error) throw error;
+        return {
+          id: data.id,
+          tenantId: data.tenant_id,
+          name: data.name,
+          description: data.description,
+          channel: data.channel,
+          status: data.status,
+          steps: data.steps || [],
+          autoExitOnReply: data.auto_exit_on_reply,
+          createdAt: data.created_at,
+          updatedAt: data.updated_at
+        };
+      } catch (err: any) {
+        if (err?.code === 'PGRST205' || err?.message?.includes('schema cache')) {
+          // Fallback return object so UI continues to function
+          return {
+            id: `cadence-${Date.now()}`,
+            tenantId: payload.tenantId,
+            name: payload.name,
+            description: payload.description || '',
+            channel: payload.channel || 'WHATSAPP',
+            status: payload.status || 'ACTIVE',
+            steps: payload.steps || [],
+            autoExitOnReply: payload.autoExitOnReply !== false,
+            createdAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString()
+          };
+        }
+        throw err;
+      }
+    },
+
+    update: async (id: string, updates: any, tenantId: string) => {
+      const client = this.getClient();
+      const dbUpdates: Record<string, any> = { updated_at: new Date().toISOString() };
+      if (updates.name !== undefined) dbUpdates.name = updates.name;
+      if (updates.description !== undefined) dbUpdates.description = updates.description;
+      if (updates.status !== undefined) dbUpdates.status = updates.status;
+      if (updates.steps !== undefined) dbUpdates.steps = updates.steps;
+      if (updates.autoExitOnReply !== undefined) dbUpdates.auto_exit_on_reply = updates.autoExitOnReply;
+
+      try {
+        const { data, error } = await client
+          .from('cadence_sequences')
+          .update(dbUpdates)
+          .eq('id', id)
+          .eq('tenant_id', tenantId)
+          .select()
+          .single();
+
+        if (error) throw error;
+        return data;
+      } catch (err: any) {
+        if (err?.code === 'PGRST205' || err?.message?.includes('schema cache')) return { id, ...updates };
+        throw err;
+      }
+    },
+
+    delete: async (id: string, tenantId: string) => {
+      const client = this.getClient();
+      try {
+        await client.from('cadence_enrollments').delete().eq('cadence_id', id).eq('tenant_id', tenantId);
+        const { error } = await client.from('cadence_sequences').delete().eq('id', id).eq('tenant_id', tenantId);
+        if (error && error.code !== 'PGRST205') throw error;
+      } catch (err: any) {
+        if (err?.code === 'PGRST205' || err?.message?.includes('schema cache')) return;
+        throw err;
+      }
+    },
+
+    enrollContacts: async (cadenceId: string, contactIds: string[], tenantId: string) => {
+      const client = this.getClient();
+      const rows = contactIds.map(cid => ({
+        tenant_id: tenantId,
+        cadence_id: cadenceId,
+        contact_id: cid,
+        current_step: 1,
+        status: 'IN_PROGRESS',
+        next_due_at: new Date().toISOString(),
+        step_history: []
+      }));
+
+      try {
+        const { data, error } = await client
+          .from('cadence_enrollments')
+          .insert(rows)
+          .select();
+
+        if (error) throw error;
+        return data?.length || 0;
+      } catch (err: any) {
+        if (err?.code === 'PGRST205' || err?.message?.includes('schema cache')) {
+          return contactIds.length;
+        }
+        throw err;
+      }
+    },
+
+    getDueToday: async (tenantId: string) => {
+      const client = this.getClient();
+      const nowIso = new Date().toISOString();
+      try {
+        const { data, error } = await client
+          .from('cadence_enrollments')
+          .select('*, cadence_sequences(*), contacts(*)')
+          .eq('tenant_id', tenantId)
+          .eq('status', 'IN_PROGRESS')
+          .lte('next_due_at', nowIso)
+          .order('next_due_at', { ascending: true });
+
+        if (error) {
+          if (error.code === 'PGRST205' || error.message?.includes('schema cache') || error.message?.includes('does not exist')) {
+            return [];
+          }
+          throw error;
+        }
+        return (data || []).map((row: any) => {
+          const seq = row.cadence_sequences;
+          const contact = row.contacts;
+          const currentStepObj = seq?.steps?.find((s: any) => s.stepNumber === row.current_step) || seq?.steps?.[row.current_step - 1];
+          return {
+            id: row.id,
+            tenantId: row.tenant_id,
+            cadenceId: row.cadence_id,
+            cadenceName: seq?.name,
+            contactId: row.contact_id,
+            contactName: contact?.display_name || contact?.first_name || 'Contact',
+            companyName: contact?.company_name,
+            phone: contact?.phone,
+            email: contact?.email,
+            channel: seq?.channel || 'WHATSAPP',
+            currentStep: row.current_step,
+            totalSteps: seq?.steps?.length || 1,
+            stepTitle: currentStepObj?.title || `Step ${row.current_step}`,
+            stepTemplate: currentStepObj?.templateSnapshot || { body: '' },
+            nextDueAt: row.next_due_at,
+            status: row.status
+          };
+        });
+      } catch (err: any) {
+        if (err?.code === 'PGRST205' || err?.message?.includes('schema cache') || err?.message?.includes('does not exist')) {
+          return [];
+        }
+        throw err;
+      }
+    },
+
+    advanceStep: async (enrollmentId: string, operatorName: string, tenantId: string) => {
+      const client = this.getClient();
+      try {
+        const { data: enrollment, error: fetchErr } = await client
+          .from('cadence_enrollments')
+          .select('*, cadence_sequences(*)')
+          .eq('id', enrollmentId)
+          .eq('tenant_id', tenantId)
+          .single();
+
+        if (fetchErr || !enrollment) {
+          return { id: enrollmentId, status: 'DISPATCHED' };
+        }
+
+        const seq = enrollment.cadence_sequences;
+        const steps = seq?.steps || [];
+        const currentStep = enrollment.current_step;
+        const history = Array.isArray(enrollment.step_history) ? [...enrollment.step_history] : [];
+
+        history.push({
+          stepNumber: currentStep,
+          dispatchedAt: new Date().toISOString(),
+          operatorName,
+          status: 'DISPATCHED'
+        });
+
+        const nextStepIndex = currentStep;
+        if (nextStepIndex < steps.length) {
+          const nextStepObj = steps[nextStepIndex];
+          const delayDays = nextStepObj?.delayDays || 2;
+          const nextDue = new Date();
+          nextDue.setDate(nextDue.getDate() + delayDays);
+
+          const { data: updated, error: updErr } = await client
+            .from('cadence_enrollments')
+            .update({
+              current_step: currentStep + 1,
+              next_due_at: nextDue.toISOString(),
+              step_history: history,
+              updated_at: new Date().toISOString()
+            })
+            .eq('id', enrollmentId)
+            .select()
+            .single();
+
+          if (updErr) throw updErr;
+          return updated;
+        } else {
+          const { data: updated, error: updErr } = await client
+            .from('cadence_enrollments')
+            .update({
+              status: 'COMPLETED',
+              step_history: history,
+              updated_at: new Date().toISOString()
+            })
+            .eq('id', enrollmentId)
+            .select()
+            .single();
+
+          if (updErr) throw updErr;
+          return updated;
+        }
+      } catch (err: any) {
+        if (err?.code === 'PGRST205' || err?.message?.includes('schema cache')) {
+          return { id: enrollmentId, status: 'DISPATCHED' };
+        }
+        throw err;
+      }
+    },
+
+    autoExitOnReply: async (contactPhone: string, tenantId?: string) => {
+      const client = this.getClient();
+      try {
+        let contactQuery = client.from('contacts').select('id, tenant_id').eq('phone', contactPhone);
+        if (tenantId) contactQuery = contactQuery.eq('tenant_id', tenantId);
+        const { data: contacts } = await contactQuery;
+
+        if (!contacts || contacts.length === 0) return 0;
+        let exitedCount = 0;
+
+        for (const c of contacts) {
+          const { data: updated } = await client
+            .from('cadence_enrollments')
+            .update({
+              status: 'PAUSED_REPLIED',
+              updated_at: new Date().toISOString()
+            })
+            .eq('contact_id', c.id)
+            .eq('status', 'IN_PROGRESS')
+            .select();
+
+          exitedCount += updated?.length || 0;
+        }
+
+        return exitedCount;
+      } catch {
+        return 0;
+      }
+    }
+  };
+
+  // ============================================================================
+  // CANNED RESPONSES REPOSITORY
+  // ============================================================================
+  cannedResponsesRepo: ICannedResponseRepository = {
+    findAll: async (tenantId: string) => {
+      const defaultCanned = [
+        {
+          id: 'canned-1',
+          tenantId,
+          title: 'Wholesale Catalog & PDF',
+          shortcut: '/catalog',
+          category: 'SALES',
+          body: 'Hello! Here is our complete wholesale product catalog and certificate sheet: https://reachoutos.com/catalog.pdf',
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString()
+        },
+        {
+          id: 'canned-2',
+          tenantId,
+          title: 'Pricing Tiers & Minimum Order',
+          shortcut: '/pricing',
+          category: 'SALES',
+          body: 'Our Minimum Order Quantity (MOQ) is 50 units with standard 18% distributor margin. Wholesale volume tier pricing applies above 200 units.',
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString()
+        },
+        {
+          id: 'canned-3',
+          tenantId,
+          title: 'Company Bank & NEFT Details',
+          shortcut: '/bank',
+          category: 'PAYMENTS',
+          body: 'ReachOut Enterprise Banking Coordinates:\nBank: HDFC Bank Ltd\nAccount: 50200088991122\nIFSC: HDFC0001234\nBranch: Financial District, Hyderabad',
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString()
+        },
+        {
+          id: 'canned-4',
+          tenantId,
+          title: 'Evaluation Sample Kit Request',
+          shortcut: '/samples',
+          category: 'SAMPLES',
+          body: 'We would be delighted to courier a complimentary commercial evaluation sample box. Please reply with your delivery address, PIN code, and contact person.',
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString()
+        }
+      ];
+
+      const client = this.getClient();
+      try {
+        const { data, error } = await client
+          .from('canned_responses')
+          .select('*')
+          .eq('tenant_id', tenantId)
+          .order('category', { ascending: true });
+
+        if (error) {
+          if (error.code === 'PGRST205' || error.message?.includes('schema cache') || error.message?.includes('does not exist')) {
+            return defaultCanned;
+          }
+          throw error;
+        }
+        if (!data || data.length === 0) {
+          return defaultCanned;
+        }
+        return (data || []).map((row: any) => ({
+          id: row.id,
+          tenantId: row.tenant_id,
+          title: row.title,
+          shortcut: row.shortcut,
+          category: row.category,
+          body: row.body,
+          createdAt: row.created_at,
+          updatedAt: row.updated_at
+        }));
+      } catch (err: any) {
+        if (err?.code === 'PGRST205' || err?.message?.includes('schema cache') || err?.message?.includes('does not exist')) {
+          return defaultCanned;
+        }
+        throw err;
+      }
+    },
+
+    create: async (payload: any) => {
+      const client = this.getClient();
+      try {
+        const { data, error } = await client
+          .from('canned_responses')
+          .insert({
+            tenant_id: payload.tenantId,
+            title: payload.title,
+            shortcut: payload.shortcut.startsWith('/') ? payload.shortcut : `/${payload.shortcut}`,
+            category: payload.category || 'SALES',
+            body: payload.body
+          })
+          .select()
+          .single();
+
+        if (error) throw error;
+        return data;
+      } catch (err: any) {
+        if (err?.code === 'PGRST205' || err?.message?.includes('schema cache')) {
+          return {
+            id: `canned-${Date.now()}`,
+            tenant_id: payload.tenantId,
+            title: payload.title,
+            shortcut: payload.shortcut.startsWith('/') ? payload.shortcut : `/${payload.shortcut}`,
+            category: payload.category || 'SALES',
+            body: payload.body,
+            created_at: new Date().toISOString(),
+            updated_at: new Date().toISOString()
+          };
+        }
+        throw err;
+      }
+    },
+
+    delete: async (id: string, tenantId: string) => {
+      const client = this.getClient();
+      try {
+        const { error } = await client
+          .from('canned_responses')
+          .delete()
+          .eq('id', id)
+          .eq('tenant_id', tenantId);
+
+        if (error && error.code !== 'PGRST205') throw error;
+      } catch (err: any) {
+        if (err?.code === 'PGRST205' || err?.message?.includes('schema cache')) return;
+        throw err;
+      }
+    }
+  };
+
+  // ============================================================================
+  // 2-WAY SMART INBOX REPOSITORY
+  // ============================================================================
+  inboxRepo: IInboxRepository = {
+    getThreads: async (tenantId: string) => {
+      const client = this.getClient();
+      const [inboundRes, contactsRes] = await Promise.all([
+        client.from('inbound_messages').select('*').eq('tenant_id', tenantId).order('received_at', { ascending: false }).limit(200),
+        client.from('contacts').select('*').eq('tenant_id', tenantId).limit(500)
+      ]);
+
+      const inboundMessages = inboundRes.data || [];
+      const contacts = contactsRes.data || [];
+      const contactMap = new Map(contacts.map(c => [c.id, c]));
+      const phoneMap = new Map(contacts.map(c => [c.phone, c]));
+
+      const threadsMap = new Map<string, any>();
+
+      for (const msg of inboundMessages) {
+        const contact = msg.contact_id ? contactMap.get(msg.contact_id) : phoneMap.get(msg.sender_address);
+        const contactKey = contact?.id || msg.sender_address;
+
+        if (!threadsMap.has(contactKey)) {
+          threadsMap.set(contactKey, {
+            contactId: contact?.id || null,
+            contactName: contact?.display_name || msg.sender_name || msg.sender_address,
+            companyName: contact?.company_name || 'Trade Inquiry',
+            phone: contact?.phone || msg.sender_address,
+            email: contact?.email || '',
+            leadStatus: contact?.lead_status || 'LEAD',
+            isGloballyBlocked: Boolean(contact?.is_globally_blocked),
+            lastMessageAt: msg.received_at,
+            lastMessageDirection: 'INBOUND',
+            lastMessageSnippet: msg.message_body,
+            unreadInboundCount: 0,
+            serviceWindowExpiresAt: msg.window_opened_until,
+            messages: []
+          });
+        }
+
+        const t = threadsMap.get(contactKey);
+        t.unreadInboundCount += 1;
+        t.messages.push({
+          id: msg.id,
+          contactId: t.contactId,
+          direction: 'INBOUND',
+          channel: msg.channel || 'WHATSAPP',
+          body: msg.message_body,
+          status: 'RECEIVED',
+          senderAddress: msg.sender_address,
+          senderName: msg.sender_name,
+          receivedAt: msg.received_at,
+          createdAt: msg.created_at
+        });
+      }
+
+      return Array.from(threadsMap.values()).sort((a, b) => new Date(b.lastMessageAt).getTime() - new Date(a.lastMessageAt).getTime());
+    },
+
+    getThreadMessages: async (contactId: string, tenantId: string) => {
+      const client = this.getClient();
+      const { data, error } = await client
+        .from('inbound_messages')
+        .select('*')
+        .eq('tenant_id', tenantId)
+        .eq('contact_id', contactId)
+        .order('received_at', { ascending: true });
+
+      if (error) throw error;
+      return (data || []).map((row: any) => ({
+        id: row.id,
+        contactId: row.contact_id,
+        direction: 'INBOUND',
+        channel: row.channel || 'WHATSAPP',
+        body: row.message_body,
+        status: 'RECEIVED',
+        senderAddress: row.sender_address,
+        senderName: row.sender_name,
+        receivedAt: row.received_at,
+        createdAt: row.created_at
+      }));
+    },
+
+    recordOutbound: async (data) => {
+      const client = this.getClient();
+      const { data: created, error } = await client
+        .from('contact_timeline')
+        .insert({
+          contact_id: data.contactId,
+          tenant_id: data.tenantId,
+          event_type: 'USER_MARKED_SENT',
+          actor_name: data.operatorName,
+          description: `Dispatched ${data.channel} message: "${data.body.substring(0, 80)}..."`,
+          metadata: { channel: data.channel, body: data.body }
+        })
+        .select()
+        .single();
+
+      if (error) throw error;
+      return created;
     }
   };
 

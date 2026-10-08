@@ -1,0 +1,37 @@
+name: ReachOut OS CI/CD
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+
+jobs:
+  validate-and-test:
+    name: Build, Audit & Test
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+
+      - name: Install Dependencies
+        run: npm ci
+
+      - name: TypeScript Typecheck
+        run: npm run lint
+
+      - name: Build Frontend & Serverless Bundle
+        run: npm run build
+
+      - name: Run Meta WhatsApp Policy Engine Tests
+        run: npx tsx tests/compliance-policy-engine.ts
+
+      - name: Run Inbound WhatsApp Webhook Tests
+        run: npx tsx tests/inbound-webhook-engine.ts

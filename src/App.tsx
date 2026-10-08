@@ -15,6 +15,9 @@ import { AICopilotView } from './components/AICopilotView';
 import { AuditLogView } from './components/AuditLogView';
 import { SettingsView } from './components/SettingsView';
 import { AdminConsoleView } from './components/AdminConsoleView';
+import { AnalyticsView } from './components/AnalyticsView';
+import { CadencesView } from './components/CadencesView';
+import { SmartInboxView } from './components/SmartInboxView';
 import { KeyboardShortcutsModal } from './components/KeyboardShortcutsModal';
 import { TourEngine } from './components/tour/TourEngine';
 import { LoginView } from './components/LoginView';
@@ -25,6 +28,7 @@ import { Tenant, User, Contact, Campaign, MessageTemplate, ContactList, AuditLog
 import { Database, ShieldAlert, ExternalLink, Terminal, CheckCircle2, AlertCircle, RefreshCw } from 'lucide-react';
 import { ReachOut3DLoader } from './components/common/ReachOut3DLoader';
 import { LandingPageView } from './components/LandingPageView';
+import { DataQualityEngine } from './core/validation/dataQuality';
 
 export default function App() {
   const [darkMode, setDarkMode] = useState(true);
@@ -447,18 +451,39 @@ export default function App() {
           const list = lists.find(l => l.id === camp.targetListId);
           const targetContacts = contacts.filter(c => list?.contactIds?.includes(c.id));
           if (targetContacts.length > 0) {
-            const initialRecipients = targetContacts.map(c => ({
-              id: `rec-${c.id}`,
-              campaignId: camp.id,
-              contactId: c.id,
-              contactName: c.displayName,
-              companyName: c.companyName,
-              channel: camp.channel,
-              channelAddress: camp.channel === 'WHATSAPP' ? c.phone : c.email,
-              resolvedMessage: camp.templateSnapshot?.body || '',
-              status: 'READY' as const,
-              createdAt: new Date().toISOString()
-            }));
+            const initialRecipients = targetContacts.map(c => {
+              const contactData: Record<string, string> = {
+                first_name: c.firstName || '',
+                last_name: c.lastName || '',
+                name: c.displayName || '',
+                company_name: c.companyName || '',
+                company: c.companyName || '',
+                city: c.city || '',
+                state: c.state || '',
+                phone: c.phone || '',
+                email: c.email || '',
+                ...(c.customFields || {})
+              };
+              const resolved = camp.templateSnapshot?.body
+                ? DataQualityEngine.resolveTemplateVariables(camp.templateSnapshot.body, contactData).resolved
+                : '';
+              const resolvedSub = camp.templateSnapshot?.subject
+                ? DataQualityEngine.resolveTemplateVariables(camp.templateSnapshot.subject, contactData).resolved
+                : undefined;
+              return {
+                id: `rec-${c.id}`,
+                campaignId: camp.id,
+                contactId: c.id,
+                contactName: c.displayName,
+                companyName: c.companyName,
+                channel: camp.channel,
+                channelAddress: camp.channel === 'WHATSAPP' ? c.phone : c.email,
+                resolvedMessage: resolved,
+                resolvedSubject: resolvedSub,
+                status: 'READY' as const,
+                createdAt: new Date().toISOString()
+              };
+            });
             recipientsCacheRef.current[selectedCampaignId] = initialRecipients;
             setCampaignRecipients(initialRecipients);
           }
@@ -735,6 +760,7 @@ export default function App() {
                   campaign={selectedCampaign}
                   recipients={campaignRecipients}
                   contacts={contacts}
+                  templates={templates}
                   onBack={() => setIsSendingWorkspaceOpen(false)}
                   onPrepare={async (recipientId) => {
                     // Split-second optimistic update: instantly show OPENED in UI
@@ -801,6 +827,7 @@ export default function App() {
                   campaign={selectedCampaign}
                   recipients={campaignRecipients}
                   contacts={contacts}
+                  templates={templates}
                   userRole={user?.role || 'VIEWER'}
                   onBack={() => setSelectedCampaignId(null)}
                   onUpdateStatus={async (newStatus) => {
@@ -940,9 +967,10 @@ export default function App() {
                     }
                   }}
                   onUpdateTemplate={async (id, data) => {
-                    // Split-second optimistic template update
+                    // 1. Instant optimistic template update
                     setTemplates(prev => prev.map(t => t.id === id ? { ...t, ...data } : t));
-                    // Optimistically cascade snapshot to matching campaigns in memory
+
+                    // 2. Optimistically cascade snapshot to matching campaigns in memory
                     setCampaigns(prev => prev.map(c => {
                       if (c.templateId === id) {
                         return {
@@ -957,14 +985,83 @@ export default function App() {
                       }
                       return c;
                     }));
-                    // Server updates template AND cascades re-resolved messages to pending recipients
+
+                    // 3. Immediately re-resolve messages for cached recipients across all campaigns matching this template
+                    const newBody = data.body;
+                    const newSubject = data.subject;
+                    if (newBody !== undefined || newSubject !== undefined) {
+                      Object.keys(recipientsCacheRef.current).forEach(campId => {
+                        const targetCamp = campaigns.find(c => c.id === campId);
+                        if (targetCamp && targetCamp.templateId === id) {
+                          const effectiveBody = newBody !== undefined ? newBody : (targetCamp.templateSnapshot?.body || '');
+                          const effectiveSub = newSubject !== undefined ? newSubject : targetCamp.templateSnapshot?.subject;
+                          recipientsCacheRef.current[campId] = (recipientsCacheRef.current[campId] || []).map(r => {
+                            const contact = contacts.find(c => c.id === r.contactId);
+                            const contactData: Record<string, string> = {
+                              first_name: contact?.firstName || '',
+                              last_name: contact?.lastName || '',
+                              name: contact?.displayName || r.contactName || '',
+                              company_name: contact?.companyName || r.companyName || '',
+                              company: contact?.companyName || r.companyName || '',
+                              city: contact?.city || '',
+                              state: contact?.state || '',
+                              phone: contact?.phone || r.channelAddress || '',
+                              email: contact?.email || r.channelAddress || '',
+                              ...(contact?.customFields || {})
+                            };
+                            return {
+                              ...r,
+                              resolvedMessage: DataQualityEngine.resolveTemplateVariables(effectiveBody, contactData).resolved,
+                              resolvedSubject: effectiveSub ? DataQualityEngine.resolveTemplateVariables(effectiveSub, contactData).resolved : r.resolvedSubject
+                            };
+                          });
+                        }
+                      });
+
+                      // 4. Update currently active campaign recipients in memory (0ms)
+                      setCampaignRecipients(prev => {
+                        if (!selectedCampaignId) return prev;
+                        const cur = campaigns.find(c => c.id === selectedCampaignId);
+                        if (cur && cur.templateId === id) {
+                          const effectiveBody = newBody !== undefined ? newBody : (cur.templateSnapshot?.body || '');
+                          const effectiveSub = newSubject !== undefined ? newSubject : cur.templateSnapshot?.subject;
+                          return prev.map(r => {
+                            const contact = contacts.find(c => c.id === r.contactId);
+                            const contactData: Record<string, string> = {
+                              first_name: contact?.firstName || '',
+                              last_name: contact?.lastName || '',
+                              name: contact?.displayName || r.contactName || '',
+                              company_name: contact?.companyName || r.companyName || '',
+                              company: contact?.companyName || r.companyName || '',
+                              city: contact?.city || '',
+                              state: contact?.state || '',
+                              phone: contact?.phone || r.channelAddress || '',
+                              email: contact?.email || r.channelAddress || '',
+                              ...(contact?.customFields || {})
+                            };
+                            return {
+                              ...r,
+                              resolvedMessage: DataQualityEngine.resolveTemplateVariables(effectiveBody, contactData).resolved,
+                              resolvedSubject: effectiveSub ? DataQualityEngine.resolveTemplateVariables(effectiveSub, contactData).resolved : r.resolvedSubject
+                            };
+                          });
+                        }
+                        return prev;
+                      });
+                    }
+
+                    // 5. Server updates template AND cascades re-resolved messages to PostgreSQL records
                     await apiClient.updateTemplate(id, data);
-                    // If current campaign uses this template, refresh recipients with updated resolved messages
+
+                    // 6. Refresh active campaign from server to ensure complete consistency
                     if (selectedCampaignId) {
                       const cur = campaigns.find(c => c.id === selectedCampaignId);
                       if (cur && cur.templateId === id) {
                         const updatedCamp = await apiClient.getCampaign(selectedCampaignId);
-                        if (updatedCamp?.recipients) setCampaignRecipients(updatedCamp.recipients);
+                        if (updatedCamp?.recipients) {
+                          recipientsCacheRef.current[selectedCampaignId] = updatedCamp.recipients;
+                          setCampaignRecipients(updatedCamp.recipients);
+                        }
                       }
                     }
                   }}
@@ -1049,6 +1146,22 @@ export default function App() {
                     setCampaigns(prev => prev.filter(c => c.id !== id));
                     await apiClient.deleteCampaign(id);
                   }}
+                  onRefresh={loadData}
+                />
+              ) : activeTab === 'inbox' ? (
+                <SmartInboxView userRole={user?.role || 'VIEWER'} />
+              ) : activeTab === 'cadences' ? (
+                <CadencesView
+                  lists={lists}
+                  contacts={contacts}
+                  templates={templates}
+                  userRole={user?.role || 'VIEWER'}
+                />
+              ) : activeTab === 'analytics' ? (
+                <AnalyticsView
+                  campaigns={campaigns}
+                  onOpenCampaign={(campId: string) => setSelectedCampaignId(campId)}
+                  userRole={user?.role || 'VIEWER'}
                 />
               ) : activeTab === 'ai' ? (
                 <AICopilotView
