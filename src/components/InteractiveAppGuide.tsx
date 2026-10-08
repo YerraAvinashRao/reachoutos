@@ -178,6 +178,21 @@ export const InteractiveAppGuide: React.FC<InteractiveAppGuideProps> = ({
       ],
       tips: 'If an incorrect campaign link or text is sent by mistake, activate the Kill Switch immediately to pause pending queues.',
       actionText: 'Go to Settings'
+    },
+    {
+      title: '10. Admin Console & Meta Policy Governance',
+      tab: 'admin',
+      icon: ShieldAlert,
+      tag: 'Enterprise Administration',
+      summary: 'Manage team members, RBAC permissions, Meta WhatsApp Business policy reviews, global suppression, and live PostgreSQL telemetry.',
+      highlights: [
+        'Team Provisioning: Invite users and dynamically elevate or demote roles with zero downtime.',
+        'Policy Decision Inspector: Review and sign off on borderline messages flagged for HUMAN_REVIEW.',
+        'Global Suppression Matrix: Add numbers or emails to permanent organization-wide blocklists.',
+        'Live Telemetry: Real-time PostgreSQL latency gauge and table row metrics.'
+      ],
+      tips: 'Admins can enforce strict compliance without interrupting operator dispatch workflows.',
+      actionText: 'Go to Admin Console'
     }
   ];
 
