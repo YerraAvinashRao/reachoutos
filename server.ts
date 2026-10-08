@@ -99,6 +99,15 @@ api.get('/health', (_req: Request, res: Response) => {
   });
 });
 
+api.get('/', (_req: Request, res: Response) => {
+  res.json({
+    status: 'OK',
+    version: '1.0.0',
+    database: 'SUPABASE_POSTGRESQL',
+    isDatabaseConfigured: db.isConfigured
+  });
+});
+
 // ---------------- 2. Database Connectivity Gate ----------------
 // When Supabase is unconfigured, reject all data requests with clean 503 error
 api.use((_req: Request, res: Response, next: NextFunction) => {

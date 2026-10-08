@@ -25,17 +25,30 @@ if (!existsSync(apiDir)) {
 
 // Inline entry: imports app from server.ts and exports a Vercel handler
 writeFileSync(tmpEntry, `
+process.env.IS_SERVERLESS = '1';
 import 'dotenv/config';
 import { app } from '../server';
 
 // Vercel serverless handler — default export
 export default function handler(req, res) {
-  // Restore original path from Vercel's x-matched-path header.
-  // Vercel rewrites /api/v1/health → /api, so we recover the real URL.
-  const matchedPath = req.headers['x-matched-path'] || '';
-  if (matchedPath && matchedPath.startsWith('/api')) {
-    req.url = matchedPath;
+  let targetUrl = req.url || '';
+  if (targetUrl.startsWith('/api?') || targetUrl === '/api' || targetUrl === '/api/' || !targetUrl.startsWith('/api/')) {
+    try {
+      const u = new URL(targetUrl, 'http://localhost');
+      const p = u.searchParams.get('__path');
+      if (p) {
+        u.searchParams.delete('__path');
+        const q = u.searchParams.toString();
+        targetUrl = '/api/' + p + (q ? '?' + q : '');
+      } else {
+        const c = req.headers['x-matched-path'] || req.headers['x-forwarded-uri'] || req.headers['x-original-url'];
+        if (c && c.startsWith('/api') && c !== '/api' && c !== '/api/') {
+          targetUrl = c;
+        }
+      }
+    } catch (_) {}
   }
+  req.url = targetUrl;
   return app(req, res);
 }
 `);

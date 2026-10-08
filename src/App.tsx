@@ -74,7 +74,7 @@ export default function App() {
       }
       setRateLimitNotice(null);
 
-      if (!health?.isDatabaseConfigured) {
+      if (health?.status === 'DATABASE_UNCONFIGURED' || health?.isDatabaseConfigured === false) {
         setIsDatabaseConfigured(false);
         setDatabaseError(health?.message || 'Supabase PostgreSQL database is not configured.');
         setAuthLoading(false);

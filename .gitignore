@@ -8,10 +8,5 @@ coverage/
 .env*
 !.env.example
 
-# Generated server bundle (created by npm run build → node scripts/build-server.mjs)
-# Vercel regenerates these during its build step, so they don't need to be in git.
-api/index.js
-api/server-bundle.mjs
-
-# Temp build files
+# Temp build file (generated and deleted by build-server.mjs)
 scripts/_vercel_entry.ts
