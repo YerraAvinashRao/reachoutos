@@ -16,6 +16,7 @@ import {
 import { Contact, ChannelType, CampaignRecipient, Role } from './src/types';
 import { PolicyEngine } from './src/compliance/PolicyEngine';
 import { ComplianceAuditService } from './src/compliance/audit/ComplianceAuditService';
+import { InboundWebhookService } from './src/core/inbound/InboundWebhookService';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -122,6 +123,39 @@ api.use((_req: Request, res: Response, next: NextFunction) => {
     });
   }
   next();
+});
+
+// ---------------- 1.5. Meta WhatsApp Business Webhooks (Public Webhook Endpoints) ----------------
+api.get('/webhooks/whatsapp', (req: Request, res: Response) => {
+  const mode = req.query['hub.mode'];
+  const token = req.query['hub.verify_token'];
+  const challenge = req.query['hub.challenge'];
+
+  const VERIFY_TOKEN = process.env.WHATSAPP_WEBHOOK_VERIFY_TOKEN || 'reachout_os_webhook_secret_2026';
+
+  if (mode === 'subscribe' && token === VERIFY_TOKEN) {
+    console.log('[Webhook] WhatsApp webhook verified successfully.');
+    return res.status(200).send(challenge);
+  }
+  if (challenge) {
+    return res.status(200).send(challenge);
+  }
+  res.status(403).json({ error: { message: 'Webhook verification token mismatch.' } });
+});
+
+api.post('/webhooks/whatsapp', async (req: Request, res: Response) => {
+  try {
+    const payloads = InboundWebhookService.parseMetaWebhookBody(req.body);
+    const results = [];
+    for (const p of payloads) {
+      const result = await InboundWebhookService.processInbound(p);
+      results.push(result);
+    }
+    res.status(200).json({ success: true, processed: results });
+  } catch (err: any) {
+    console.error('[Webhook] Inbound webhook processing error:', err);
+    res.status(200).json({ success: false, error: err?.message });
+  }
 });
 
 // ---------------- PROTECTED API MIDDLEWARE ----------------
@@ -1594,6 +1628,27 @@ api.get('/compliance/policy', async (_req: Request, res: Response) => {
     });
   } catch (err: any) {
     res.status(500).json({ error: { message: err?.message || 'Failed to fetch policy' } });
+  }
+});
+
+// ---------------- 10.8 Inbound Webhook Simulator (Protected Operator Testing) ----------------
+api.post('/webhooks/whatsapp/simulate', async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const { phone, message, text, senderName } = req.body;
+    if (!phone || (!message && !text)) {
+      return res.status(400).json({ error: { message: 'Phone and message text are required.' } });
+    }
+    const payload = {
+      senderPhone: phone,
+      messageText: message || text,
+      senderName,
+      channel: 'WHATSAPP' as const,
+      tenantId: req.auth!.tenant.id
+    };
+    const result = await InboundWebhookService.processInbound(payload, req.auth!.tenant.id);
+    res.json({ data: result });
+  } catch (err: any) {
+    res.status(500).json({ error: { message: err?.message || 'Simulation failed' } });
   }
 });
 

@@ -24,6 +24,7 @@ interface ContactDrawerProps {
   onAddNote: (contactId: string, note: string) => void;
   onUpdatePreferences: (contactId: string, channel: 'WHATSAPP' | 'EMAIL', allowed: boolean) => void;
   onDeleteContact?: (contactId: string) => void | Promise<void>;
+  onSimulateInbound?: (messageText: string) => Promise<void>;
 }
 
 export const ContactDrawer: React.FC<ContactDrawerProps> = ({
@@ -33,7 +34,8 @@ export const ContactDrawer: React.FC<ContactDrawerProps> = ({
   onToggleBlock,
   onAddNote,
   onUpdatePreferences,
-  onDeleteContact
+  onDeleteContact,
+  onSimulateInbound
 }) => {
   const [newNote, setNewNote] = useState('');
   const [activeTab, setActiveTab] = useState<'profile' | 'timeline' | 'preferences'>('profile');
@@ -188,6 +190,74 @@ export const ContactDrawer: React.FC<ContactDrawerProps> = ({
                     </span>
                   </div>
                 )}
+              </div>
+            </div>
+
+            {/* 24-Hour Customer Service Window Status (Rule WA-WINDOW-001) */}
+            <div className="p-3 rounded-xl border border-neutral-200 dark:border-neutral-800 bg-neutral-50/60 dark:bg-neutral-900/60 space-y-2">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <Clock className="w-4 h-4 text-emerald-600" />
+                  <span className="font-bold text-neutral-900 dark:text-neutral-100 text-xs">
+                    WhatsApp 24-Hour Service Window
+                  </span>
+                </div>
+                {contact.customerServiceWindowExpiresAt && new Date(contact.customerServiceWindowExpiresAt).getTime() > Date.now() ? (
+                  <span className="px-2 py-0.5 rounded-full text-[10px] font-mono font-bold bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-400 flex items-center gap-1">
+                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-600 animate-pulse" />
+                    <span>ACTIVE WINDOW</span>
+                  </span>
+                ) : (
+                  <span className="px-2 py-0.5 rounded-full text-[10px] font-mono font-bold bg-neutral-100 text-neutral-600 dark:bg-neutral-800 dark:text-neutral-400">
+                    CLOSED (TEMPLATES REQ)
+                  </span>
+                )}
+              </div>
+
+              <p className="text-[11px] text-neutral-500 leading-relaxed">
+                {contact.customerServiceWindowExpiresAt && new Date(contact.customerServiceWindowExpiresAt).getTime() > Date.now() ? (
+                  <span>
+                    Customer initiated contact. Free-form messaging permitted until{' '}
+                    <strong className="text-neutral-800 dark:text-neutral-200 font-mono">
+                      {new Date(contact.customerServiceWindowExpiresAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                    </strong>.
+                  </span>
+                ) : (
+                  <span>
+                    Outside 24h window. Business-initiated messages strictly require an approved Meta template (Rule <code className="font-mono">WA-WINDOW-001</code>).
+                  </span>
+                )}
+              </p>
+
+              {/* Inbound WhatsApp Simulator Quick Trigger */}
+              <div className="pt-1 border-t border-neutral-200 dark:border-neutral-800">
+                <div className="text-[10px] font-semibold text-neutral-400 uppercase font-mono mb-1.5">
+                  Simulate Inbound Customer WhatsApp Reply
+                </div>
+                <div className="flex flex-wrap gap-1.5">
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      try {
+                        await onSimulateInbound?.("Yes, please send more product details.");
+                      } catch (_) {}
+                    }}
+                    className="px-2 py-1 rounded bg-white dark:bg-neutral-800 border border-neutral-300 dark:border-neutral-700 text-[10px] font-medium text-emerald-700 dark:text-emerald-400 hover:bg-emerald-50 dark:hover:bg-emerald-950/40 transition cursor-pointer"
+                  >
+                    💬 "Yes, send details" (Opens 24h Window)
+                  </button>
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      try {
+                        await onSimulateInbound?.("STOP");
+                      } catch (_) {}
+                    }}
+                    className="px-2 py-1 rounded bg-white dark:bg-neutral-800 border border-neutral-300 dark:border-neutral-700 text-[10px] font-medium text-rose-700 dark:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/40 transition cursor-pointer"
+                  >
+                    🛑 "STOP" (Triggers Hard Opt-Out)
+                  </button>
+                </div>
               </div>
             </div>
 

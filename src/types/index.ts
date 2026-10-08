@@ -61,7 +61,9 @@ export interface TimelineEvent {
     | 'OPTED_OUT' 
     | 'BLOCKED' 
     | 'NOTE_ADDED' 
-    | 'TAG_ADDED';
+    | 'TAG_ADDED'
+    | 'INBOUND_MESSAGE_RECEIVED'
+    | 'OPT_OUT_RECEIVED';
   actor: string;
   actorId?: string;
   actorName?: string;
@@ -96,8 +98,26 @@ export interface Contact {
   blockedReason?: string;
   lastInteractionAt?: string;
   lastMessageSentAt?: string;
+  lastInboundMessageAt?: string;
+  customerServiceWindowExpiresAt?: string;
   createdAt: string;
   updatedAt: string;
+}
+
+export interface InboundMessage {
+  id: string;
+  tenantId: string;
+  contactId?: string;
+  channel: ChannelType;
+  senderAddress: string;
+  senderName?: string;
+  messageType: string;
+  messageBody: string;
+  rawPayload?: any;
+  isOptOutTrigger: boolean;
+  windowOpenedUntil?: string;
+  receivedAt: string;
+  createdAt: string;
 }
 
 export interface ContactList {

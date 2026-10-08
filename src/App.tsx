@@ -1103,6 +1103,21 @@ export default function App() {
                   setSelectedContact(null);
                   loadData();
                 }}
+                onSimulateInbound={async (messageText) => {
+                  if (!selectedContact) return;
+                  try {
+                    await apiClient.simulateInboundWebhook({
+                      phone: selectedContact.phone,
+                      message: messageText,
+                      senderName: selectedContact.displayName
+                    });
+                    await loadData();
+                    const updatedTimeline = await apiClient.getContactTimeline(selectedContact.id);
+                    if (updatedTimeline) setSelectedContactTimeline(updatedTimeline);
+                  } catch (err) {
+                    console.error('Inbound simulation error:', err);
+                  }
+                }}
               />
             )}
 

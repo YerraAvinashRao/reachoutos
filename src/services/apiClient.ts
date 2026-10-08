@@ -513,6 +513,16 @@ class ApiClient {
     const json = await this.request('/api/v1/admin/system/health');
     return json.data;
   }
+
+  // ================= INBOUND WEBHOOK SIMULATOR =================
+  async simulateInboundWebhook(data: { phone: string; message: string; senderName?: string }) {
+    const json = await this.request('/api/v1/webhooks/whatsapp/simulate', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data)
+    });
+    return json.data;
+  }
 }
 
 export const apiClient = new ApiClient();
