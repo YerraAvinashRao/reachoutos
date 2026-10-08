@@ -1,0 +1,35 @@
+{
+  "version": "2026-10",
+  "authority": "Meta WhatsApp Business Messaging Policy - Enforcement Tiering",
+  "last_updated": "2026-10-08",
+  "decision_tiers": {
+    "ALLOW": {
+      "code": "ALLOW",
+      "symbol": "🟢",
+      "description": "All mandatory Meta policy and safety criteria passed without flags.",
+      "allows_automated_dispatch": true
+    },
+    "HUMAN_REVIEW": {
+      "code": "HUMAN_REVIEW",
+      "symbol": "🟡",
+      "description": "Potential policy ambiguity, regulated claim, or missing metadata requires human review.",
+      "allows_automated_dispatch": false,
+      "requires_operator_confirmation": true
+    },
+    "BLOCK": {
+      "code": "BLOCK",
+      "symbol": "🔴",
+      "description": "Mandatory Meta policy violation detected. Send action is prohibited.",
+      "allows_automated_dispatch": false,
+      "ai_override_permitted": false,
+      "operator_override_permitted": false
+    }
+  },
+  "enforcement_invariants": {
+    "fail_closed": true,
+    "ai_cannot_override_blocking_rule": true,
+    "opt_out_is_absolute_lock": true,
+    "every_evaluation_is_audited": true,
+    "preserve_historical_policy_versions": true
+  }
+}

@@ -417,6 +417,21 @@ class ApiClient {
     return json.data;
   }
 
+  // ================= COMPLIANCE POLICY ENGINE =================
+  async evaluateCompliance(context: any) {
+    const json = await this.request('/api/v1/compliance/evaluate', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(context)
+    });
+    return json.data;
+  }
+
+  async getCompliancePolicy() {
+    const json = await this.request('/api/v1/compliance/policy');
+    return json.data;
+  }
+
   // ================= AUDIT & STATS =================
   async getAuditLogs(limit = 50) {
     const json = await this.request(`/api/v1/audit?limit=${limit}`);

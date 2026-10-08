@@ -1,0 +1,25 @@
+{
+  "version": "2026-10",
+  "authority": "Meta Commerce Policy",
+  "last_updated": "2026-10-08",
+  "commerce_rules": {
+    "catalog_compliance_required": true,
+    "accurate_pricing_mandatory": true,
+    "clear_refund_policy_required": true,
+    "restricted_commerce_categories": [
+      "pharmaceuticals",
+      "alcohol",
+      "tobacco",
+      "weapons",
+      "adult_products",
+      "financial_instruments",
+      "live_animals",
+      "hazardous_materials"
+    ],
+    "transaction_invariants": {
+      "no_hidden_fees": true,
+      "disclose_shipping_before_order": true,
+      "honor_cancellation_within_statutory_period": true
+    }
+  }
+}

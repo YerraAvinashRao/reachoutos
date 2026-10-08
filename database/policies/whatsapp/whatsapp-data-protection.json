@@ -1,0 +1,44 @@
+{
+  "version": "2026-10",
+  "authority": "Meta WhatsApp Business Messaging Policy - Data Handling",
+  "last_updated": "2026-10-08",
+  "data_protection_rules": {
+    "prohibited_sensitive_data": [
+      {
+        "type": "PAYMENT_CARD_NUMBER",
+        "description": "Full 13 to 19 digit primary account numbers (PAN)",
+        "pattern": "\\b(?:4[0-9]{12}(?:[0-9]{3})?|5[1-5][0-9]{14}|3[47][0-9]{13}|3(?:0[0-5]|[68][0-9])[0-9]{11}|6(?:011|5[0-9]{2})[0-9]{12}|(?:2131|1800|35\\d{3})\\d{11})\\b",
+        "severity": "BLOCKING"
+      },
+      {
+        "type": "CARD_CVV_CVC",
+        "description": "Credit card security codes (CVV / CVC)",
+        "pattern": "\\b(?:cvv|cvc|security code)\\s*[:=]?\\s*[0-9]{3,4}\\b",
+        "severity": "BLOCKING"
+      },
+      {
+        "type": "NATIONAL_ID_US_SSN",
+        "description": "US Social Security Numbers",
+        "pattern": "\\b(?!000|666|9\\d{2})\\d{3}[- ]?(?!00)\\d{2}[- ]?(?!0000)\\d{4}\\b",
+        "severity": "BLOCKING"
+      },
+      {
+        "type": "NATIONAL_ID_INDIA_AADHAAR",
+        "description": "Indian Aadhaar numbers (12-digit UID)",
+        "pattern": "\\b[2-9]{1}[0-9]{3}\\s?[0-9]{4}\\s?[0-9]{4}\\b",
+        "severity": "BLOCKING"
+      },
+      {
+        "type": "BANK_ACCOUNT_PASSWORD_PIN",
+        "description": "Banking PINs and account credentials",
+        "pattern": "\\b(?:atm pin|netbanking password|upi pin)\\s*[:=]?\\s*\\w+\\b",
+        "severity": "BLOCKING"
+      }
+    ],
+    "privacy_invariants": {
+      "never_disclose_other_contacts_pii": true,
+      "anonymize_sensitive_health_records": true,
+      "block_insecure_credential_requests": true
+    }
+  }
+}

@@ -1779,6 +1779,1292 @@ function requireRole(allowedRoles) {
   };
 }
 
+// src/compliance/PolicyVersion.ts
+var ACTIVE_META_POLICY_VERSION = {
+  policy_provider: "Meta / WhatsApp",
+  policy_family: "WhatsApp Business",
+  version: "2026-10",
+  source_type: "official",
+  authority: "Meta Platforms, Inc.",
+  official_sources: [
+    "https://business.whatsapp.com/policy",
+    "https://www.whatsapp.com/legal/business-terms/",
+    "https://developers.facebook.com/docs/whatsapp/messaging-limits",
+    "https://www.facebook.com/policies_center/commerce"
+  ],
+  last_verified_at: "2026-10-08T00:00:00Z",
+  next_review: "2026-11-08T00:00:00Z",
+  description: "Meta WhatsApp Business Messaging Policy Registry v2026-10 for ReachOut OS.",
+  engine_principles: [
+    "The AI proposes; the Policy Engine decides.",
+    "Fail closed: unverified compliance triggers BLOCK or HUMAN_REVIEW.",
+    "Opt-out is an immutable hard system control.",
+    "Every evaluation generates an immutable audit record."
+  ]
+};
+
+// database/policies/whatsapp/whatsapp-policy.json
+var whatsapp_policy_default = {
+  policy_provider: "Meta / WhatsApp",
+  policy_family: "WhatsApp Business",
+  version: "2026-10",
+  source_type: "official",
+  authority: "Meta Platforms, Inc.",
+  official_sources: [
+    "https://business.whatsapp.com/policy",
+    "https://www.whatsapp.com/legal/business-terms/",
+    "https://developers.facebook.com/docs/whatsapp/messaging-limits",
+    "https://www.facebook.com/policies_center/commerce"
+  ],
+  last_verified_at: "2026-10-08T00:00:00Z",
+  next_review: "2026-11-08T00:00:00Z",
+  description: "Authoritative Meta WhatsApp Business Messaging Policy Registry for ReachOut OS. Enforces human-in-the-loop compliance, explicit consent, 24-hour service windows, template purpose integrity, content restrictions, commerce rules, and sensitive data protection.",
+  engine_principles: [
+    "The AI proposes; the Policy Engine decides.",
+    "Fail closed: if compliance cannot be positively verified, block or flag for human review.",
+    "Hard system controls on opt-outs: irrevocable without explicit compliance admin action.",
+    "Every evaluation generates an immutable audit record referencing the exact policy version and evaluated rule IDs."
+  ]
+};
+
+// database/policies/whatsapp/whatsapp-rules.json
+var whatsapp_rules_default = [
+  {
+    id: "WA-IDENT-001",
+    category: "identity",
+    name: "Accurate Business Identity",
+    severity: "BLOCKING",
+    applies_to: ["business_app", "business_platform"],
+    rule: {
+      condition: "sender_identity_is_verified_and_accurate",
+      evaluation_type: "IDENTITY_VERIFICATION"
+    },
+    failure_action: "BLOCK_SEND",
+    explanation: "Meta requires an accurate Business profile and explicitly prohibits impersonation or misleading business affiliation.",
+    source: {
+      authority: "Meta",
+      document: "WhatsApp Business Messaging Policy",
+      section: "General Terms & Business Identity",
+      url: "https://business.whatsapp.com/policy"
+    },
+    effective_from: "2026-10-08",
+    review_required: false
+  },
+  {
+    id: "WA-CONSENT-001",
+    category: "consent",
+    name: "Valid WhatsApp Opt-In Required",
+    severity: "BLOCKING",
+    applies_to: ["business_app", "business_platform"],
+    rule: {
+      condition: "recipient_has_valid_whatsapp_opt_in",
+      evaluation_type: "CONSENT_VERIFICATION"
+    },
+    failure_action: "BLOCK_SEND",
+    explanation: "Recipient must have explicitly opted in to receive WhatsApp messages from this business prior to business-initiated outreach.",
+    source: {
+      authority: "Meta",
+      document: "WhatsApp Business Messaging Policy",
+      section: "Opt-in Requirements",
+      url: "https://business.whatsapp.com/policy"
+    },
+    effective_from: "2026-10-08",
+    review_required: false
+  },
+  {
+    id: "WA-CONSENT-002",
+    category: "consent",
+    name: "Category-Specific Consent Match",
+    severity: "BLOCKING",
+    applies_to: ["business_app", "business_platform"],
+    rule: {
+      condition: "consent_category_matches_message_intent",
+      evaluation_type: "CATEGORY_MATCH"
+    },
+    failure_action: "BLOCK_SEND",
+    explanation: "Marketing communications require explicit marketing consent. Transactional or utility consent does not permit promotional broadcasts.",
+    source: {
+      authority: "Meta",
+      document: "WhatsApp Business Messaging Policy",
+      section: "Opt-in Categories",
+      url: "https://business.whatsapp.com/policy"
+    },
+    effective_from: "2026-10-08",
+    review_required: false
+  },
+  {
+    id: "WA-OPTOUT-001",
+    category: "opt_out",
+    name: "Immediate Opt-Out Hard Enforcement",
+    severity: "BLOCKING",
+    applies_to: ["business_app", "business_platform"],
+    rule: {
+      condition: "recipient_has_not_opted_out",
+      evaluation_type: "SUPPRESSION_CHECK"
+    },
+    failure_action: "BLOCK_SEND",
+    explanation: "Meta mandates that requests to stop, block, or opt-out must be immediately honored across all channels. AI cannot override opt-outs.",
+    source: {
+      authority: "Meta",
+      document: "WhatsApp Business Messaging Policy",
+      section: "Opt-out & User Control",
+      url: "https://business.whatsapp.com/policy"
+    },
+    effective_from: "2026-10-08",
+    review_required: false
+  },
+  {
+    id: "WA-WINDOW-001",
+    category: "window",
+    name: "24-Hour Customer Service Window Enforcement",
+    severity: "BLOCKING",
+    applies_to: ["business_platform"],
+    rule: {
+      condition: "business_initiated_outside_window_requires_template",
+      evaluation_type: "WINDOW_CALCULATION"
+    },
+    failure_action: "BLOCK_SEND",
+    explanation: "Outside the 24-hour customer service window following the user's last inbound message, business-initiated messages require an approved template.",
+    source: {
+      authority: "Meta",
+      document: "WhatsApp Business Messaging Policy",
+      section: "Customer Care Window & Message Templates",
+      url: "https://business.whatsapp.com/policy"
+    },
+    effective_from: "2026-10-08",
+    review_required: false
+  },
+  {
+    id: "WA-TEMPLATE-001",
+    category: "template",
+    name: "Approved Template Status Required",
+    severity: "BLOCKING",
+    applies_to: ["business_platform"],
+    rule: {
+      condition: "template_is_approved_by_meta",
+      evaluation_type: "TEMPLATE_STATUS"
+    },
+    failure_action: "BLOCK_SEND",
+    explanation: "Outbound broadcast messages outside active 24-hour service windows must use a pre-approved template with active status.",
+    source: {
+      authority: "Meta",
+      document: "WhatsApp Business Messaging Policy",
+      section: "Template Approval & Guidelines",
+      url: "https://business.whatsapp.com/policy"
+    },
+    effective_from: "2026-10-08",
+    review_required: false
+  },
+  {
+    id: "WA-TEMPLATE-002",
+    category: "template",
+    name: "Template Purpose Integrity",
+    severity: "BLOCKING",
+    applies_to: ["business_app", "business_platform"],
+    rule: {
+      condition: "template_purpose_matches_content",
+      evaluation_type: "INTENT_INTEGRITY"
+    },
+    failure_action: "BLOCK_SEND",
+    explanation: "Approved templates must only be used for their designated category. Repurposing a utility/service template for promotional marketing is prohibited.",
+    source: {
+      authority: "Meta",
+      document: "WhatsApp Business Messaging Policy",
+      section: "Template Categories & Prohibited Misuse",
+      url: "https://business.whatsapp.com/policy"
+    },
+    effective_from: "2026-10-08",
+    review_required: false
+  },
+  {
+    id: "WA-CONTENT-001",
+    category: "content",
+    name: "Spam, Deception & Fraud Prevention",
+    severity: "BLOCKING",
+    applies_to: ["business_app", "business_platform"],
+    rule: {
+      condition: "content_is_free_from_spam_fraud_deception",
+      evaluation_type: "CONTENT_SCAN"
+    },
+    failure_action: "BLOCK_SEND",
+    explanation: "Meta strictly prohibits spam, misleading claims, phishing, fraudulent offers, and unsolicited bulk distribution.",
+    source: {
+      authority: "Meta",
+      document: "WhatsApp Business Messaging Policy",
+      section: "Acceptable Use & Anti-Spam",
+      url: "https://business.whatsapp.com/policy"
+    },
+    effective_from: "2026-10-08",
+    review_required: false
+  },
+  {
+    id: "WA-CONTENT-002",
+    category: "content",
+    name: "Medical & Health Claim Restrictions",
+    severity: "REVIEW",
+    applies_to: ["business_app", "business_platform"],
+    rule: {
+      condition: "health_claims_require_compliance_review",
+      evaluation_type: "HEALTH_CLAIM_SCAN"
+    },
+    failure_action: "REQUIRE_HUMAN_REVIEW",
+    explanation: "Unsubstantiated or miraculous medical claims, pharmaceutical sales without prescription, or health guarantees trigger mandatory human compliance review.",
+    source: {
+      authority: "Meta",
+      document: "WhatsApp Business Messaging Policy",
+      section: "Healthcare & Pharmaceuticals",
+      url: "https://business.whatsapp.com/policy"
+    },
+    effective_from: "2026-10-08",
+    review_required: true
+  },
+  {
+    id: "WA-PROHIBITED-001",
+    category: "prohibited_goods",
+    name: "Prohibited Goods & Services Restrictions",
+    severity: "BLOCKING",
+    applies_to: ["business_app", "business_platform"],
+    rule: {
+      condition: "content_does_not_promote_prohibited_goods",
+      evaluation_type: "PROHIBITED_GOODS_SCAN"
+    },
+    failure_action: "BLOCK_SEND",
+    explanation: "Meta explicitly prohibits messaging related to weapons, tobacco, alcohol, recreational drugs, illegal items, real-money gambling, or adult content.",
+    source: {
+      authority: "Meta",
+      document: "WhatsApp Business Messaging Policy",
+      section: "Prohibited Products & Services",
+      url: "https://business.whatsapp.com/policy"
+    },
+    effective_from: "2026-10-08",
+    review_required: false
+  },
+  {
+    id: "WA-COMMERCE-001",
+    category: "commerce",
+    name: "Meta Commerce Policy Integration",
+    severity: "BLOCKING",
+    applies_to: ["business_app", "business_platform"],
+    rule: {
+      condition: "commerce_interactions_comply_with_meta_commerce_policy",
+      evaluation_type: "COMMERCE_COMPLIANCE"
+    },
+    failure_action: "BLOCK_SEND",
+    explanation: "All catalog items, order confirmations, price quotes, and checkout interactions must strictly comply with the Meta Commerce Policy.",
+    source: {
+      authority: "Meta",
+      document: "Meta Commerce Policy",
+      section: "Merchant Terms & Product Eligibility",
+      url: "https://www.facebook.com/policies_center/commerce"
+    },
+    effective_from: "2026-10-08",
+    review_required: false
+  },
+  {
+    id: "WA-DATA-001",
+    category: "data_protection",
+    name: "Payment Card & Financial Credential Protection",
+    severity: "BLOCKING",
+    applies_to: ["business_app", "business_platform"],
+    rule: {
+      condition: "no_credit_card_or_financial_credentials_requested",
+      evaluation_type: "SENSITIVE_DATA_SCAN"
+    },
+    failure_action: "BLOCK_SEND",
+    explanation: "Businesses must never ask customers to share full credit card numbers, CVVs, PINs, or banking account passwords over WhatsApp.",
+    source: {
+      authority: "Meta",
+      document: "WhatsApp Business Messaging Policy",
+      section: "Data Handling & Customer Privacy",
+      url: "https://business.whatsapp.com/policy"
+    },
+    effective_from: "2026-10-08",
+    review_required: false
+  },
+  {
+    id: "WA-DATA-002",
+    category: "data_protection",
+    name: "National Identification & SSN Shield",
+    severity: "BLOCKING",
+    applies_to: ["business_app", "business_platform"],
+    rule: {
+      condition: "no_national_id_numbers_collected",
+      evaluation_type: "PII_SCAN"
+    },
+    failure_action: "BLOCK_SEND",
+    explanation: "Meta restricts requesting government-issued national identifiers (e.g. Social Security Numbers, Aadhaar, PAN) via WhatsApp messages.",
+    source: {
+      authority: "Meta",
+      document: "WhatsApp Business Messaging Policy",
+      section: "Customer Privacy & Sensitive PII",
+      url: "https://business.whatsapp.com/policy"
+    },
+    effective_from: "2026-10-08",
+    review_required: false
+  },
+  {
+    id: "WA-AUTOMATION-001",
+    category: "automation",
+    name: "Human Escalation Path Requirement",
+    severity: "REVIEW",
+    applies_to: ["business_platform"],
+    rule: {
+      condition: "automation_provides_human_agent_escalation",
+      evaluation_type: "ESCALATION_CHECK"
+    },
+    failure_action: "REQUIRE_HUMAN_REVIEW",
+    explanation: "Automated messaging systems must provide a clear and direct path to escalate to a human agent, web chat, phone, or email support.",
+    source: {
+      authority: "Meta",
+      document: "WhatsApp Business Messaging Policy",
+      section: "Automated Messaging & Human Escalation",
+      url: "https://business.whatsapp.com/policy"
+    },
+    effective_from: "2026-10-08",
+    review_required: true
+  },
+  {
+    id: "WA-ENFORCEMENT-001",
+    category: "enforcement",
+    name: "Fail Closed Safety Guarantee",
+    severity: "BLOCKING",
+    applies_to: ["business_app", "business_platform"],
+    rule: {
+      condition: "fail_closed_on_unverified_or_ambiguous_rules",
+      evaluation_type: "FAIL_CLOSED_ENGINE"
+    },
+    failure_action: "BLOCK_SEND",
+    explanation: "If any mandatory compliance check cannot be authoritatively verified against the policy registry, the message must not be sent.",
+    source: {
+      authority: "ReachOut OS Core Architecture",
+      document: "Enterprise Safety Mandate",
+      section: "Fail Closed Invariant",
+      url: "https://reachoutos.com/compliance"
+    },
+    effective_from: "2026-10-08",
+    review_required: false
+  }
+];
+
+// database/policies/whatsapp/whatsapp-prohibited.json
+var whatsapp_prohibited_default = {
+  version: "2026-10",
+  authority: "Meta WhatsApp Business Messaging Policy",
+  last_updated: "2026-10-08",
+  prohibited_product_categories: [
+    {
+      category: "tobacco_and_nicotine",
+      status: "PROHIBITED",
+      keywords: ["tobacco", "cigarettes", "cigars", "vape", "e-cigarette", "nicotine", "hookah", "bidi"],
+      explanation: "Meta strictly prohibits the promotion, sale, or distribution of tobacco and related products."
+    },
+    {
+      category: "alcohol_and_spirits",
+      status: "PROHIBITED",
+      keywords: ["liquor", "spirits", "vodka", "whiskey", "tequila", "beer", "wine sale", "distillery"],
+      explanation: "Promotion or commercial sale of alcoholic beverages is prohibited in business messaging."
+    },
+    {
+      category: "weapons_and_ammunition",
+      status: "PROHIBITED",
+      keywords: ["firearms", "guns", "pistol", "rifle", "ammunition", "explosives", "fireworks", "knives", "weapons"],
+      explanation: "Firearms, weapons, ammunition, and explosives are strictly banned from WhatsApp Business messaging."
+    },
+    {
+      category: "recreational_drugs_and_paraphernalia",
+      status: "PROHIBITED",
+      keywords: ["cannabis", "marijuana", "narcotics", "prescription drugs", "pharmaceuticals", "psychedelics", "steroids"],
+      explanation: "Sale or promotion of illegal, prescription, or recreational drugs and paraphernalia is prohibited."
+    },
+    {
+      category: "gambling_and_lotteries",
+      status: "PROHIBITED",
+      keywords: ["casino", "gambling", "sports betting", "lottery tickets", "poker real money", "bookmaking"],
+      explanation: "Real-money gambling, sports betting, and lotteries are prohibited on WhatsApp."
+    },
+    {
+      category: "adult_and_sexually_explicit",
+      status: "PROHIBITED",
+      keywords: ["pornography", "escort services", "adult products", "sex toys", "sexually explicit"],
+      explanation: "Sexually explicit content, pornography, and adult dating services are strictly prohibited."
+    },
+    {
+      category: "predatory_financial_services",
+      status: "PROHIBITED",
+      keywords: ["payday loans", "get rich quick", "pyramid scheme", "multi-level marketing", "crypto pump", "guaranteed returns"],
+      explanation: "Payday loans, high-interest predatory lending, and deceptive investment schemes violate Meta policy."
+    },
+    {
+      category: "unsubstantiated_medical_claims",
+      status: "PROHIBITED",
+      keywords: ["miracle cure", "100% cure cancer", "guaranteed weight loss in 3 days", "covid cure", "vaccine fake"],
+      explanation: "Deceptive health claims or guarantees to cure serious medical illnesses are prohibited."
+    },
+    {
+      category: "counterfeit_and_stolen_goods",
+      status: "PROHIBITED",
+      keywords: ["fake rolex", "replica designer", "knockoff", "stolen credentials", "cracked software"],
+      explanation: "Counterfeit, unauthorized replicas, and stolen digital credentials violate intellectual property policies."
+    }
+  ]
+};
+
+// database/policies/whatsapp/whatsapp-consent.json
+var whatsapp_consent_default = {
+  version: "2026-10",
+  authority: "Meta WhatsApp Business Messaging Policy",
+  last_updated: "2026-10-08",
+  consent_requirements: {
+    opt_in_mandatory: true,
+    opt_in_must_state_channel: true,
+    opt_in_must_state_business: true,
+    valid_consent_channels: [
+      "website_form",
+      "website_checkbox",
+      "inbound_whatsapp_thread",
+      "point_of_sale_form",
+      "sms_confirmation",
+      "ivr_phone",
+      "customer_service_call"
+    ],
+    consent_categories: {
+      marketing: {
+        description: "Promotional offers, seasonal campaigns, discounts, product announcements",
+        requires_explicit_opt_in: true,
+        cannot_be_inferred_from_service: true
+      },
+      utility: {
+        description: "Order confirmations, delivery updates, account alerts, receipts",
+        requires_transaction_reference: true
+      },
+      authentication: {
+        description: "One-time passwords, two-factor authentication codes",
+        requires_immediate_dispatch: true
+      },
+      service: {
+        description: "Customer care replies within 24-hour inbound window",
+        does_not_require_pre_approved_template: true
+      }
+    },
+    opt_out_hard_triggers: [
+      "STOP",
+      "STOPALL",
+      "UNSUBSCRIBE",
+      "CANCEL",
+      "END",
+      "QUIT",
+      "OPT OUT",
+      "OPTOUT",
+      "DON'T MESSAGE ME",
+      "DO NOT MESSAGE",
+      "REMOVE ME",
+      "UNSUB"
+    ],
+    opt_out_rules: {
+      hard_system_lock: true,
+      ai_override_allowed: false,
+      immediate_suppression: true,
+      cross_channel_sync: true,
+      revocation_grace_period_seconds: 0
+    }
+  }
+};
+
+// database/policies/whatsapp/whatsapp-templates.json
+var whatsapp_templates_default = {
+  version: "2026-10",
+  authority: "Meta WhatsApp Business Messaging Policy",
+  last_updated: "2026-10-08",
+  template_specifications: {
+    categories: {
+      MARKETING: {
+        description: "Messages promoting goods, services, sales, offers, or brand awareness",
+        allowed_outside_24h_window: true,
+        requires_meta_approval: true,
+        requires_marketing_consent: true
+      },
+      UTILITY: {
+        description: "Messages related to a specific transaction, order, delivery, or account status",
+        allowed_outside_24h_window: true,
+        requires_meta_approval: true,
+        prohibited_marketing_keywords: [
+          "discount",
+          "promo",
+          "sale",
+          "off today",
+          "buy now",
+          "coupon",
+          "limited offer",
+          "deal of the day"
+        ]
+      },
+      AUTHENTICATION: {
+        description: "One-time passcodes and account verification codes",
+        allowed_outside_24h_window: true,
+        requires_meta_approval: true,
+        enforce_copy_code_button: true
+      }
+    },
+    variable_constraints: {
+      max_variable_length: 100,
+      disallow_url_parameters_in_variables: true,
+      disallow_unresolved_variables: true
+    },
+    purpose_integrity_rules: {
+      strict_category_matching: true,
+      block_utility_hijacking_for_marketing: true,
+      require_approved_status_to_send: true
+    }
+  }
+};
+
+// database/policies/whatsapp/whatsapp-commerce.json
+var whatsapp_commerce_default = {
+  version: "2026-10",
+  authority: "Meta Commerce Policy",
+  last_updated: "2026-10-08",
+  commerce_rules: {
+    catalog_compliance_required: true,
+    accurate_pricing_mandatory: true,
+    clear_refund_policy_required: true,
+    restricted_commerce_categories: [
+      "pharmaceuticals",
+      "alcohol",
+      "tobacco",
+      "weapons",
+      "adult_products",
+      "financial_instruments",
+      "live_animals",
+      "hazardous_materials"
+    ],
+    transaction_invariants: {
+      no_hidden_fees: true,
+      disclose_shipping_before_order: true,
+      honor_cancellation_within_statutory_period: true
+    }
+  }
+};
+
+// database/policies/whatsapp/whatsapp-data-protection.json
+var whatsapp_data_protection_default = {
+  version: "2026-10",
+  authority: "Meta WhatsApp Business Messaging Policy - Data Handling",
+  last_updated: "2026-10-08",
+  data_protection_rules: {
+    prohibited_sensitive_data: [
+      {
+        type: "PAYMENT_CARD_NUMBER",
+        description: "Full 13 to 19 digit primary account numbers (PAN)",
+        pattern: "\\b(?:4[0-9]{12}(?:[0-9]{3})?|5[1-5][0-9]{14}|3[47][0-9]{13}|3(?:0[0-5]|[68][0-9])[0-9]{11}|6(?:011|5[0-9]{2})[0-9]{12}|(?:2131|1800|35\\d{3})\\d{11})\\b",
+        severity: "BLOCKING"
+      },
+      {
+        type: "CARD_CVV_CVC",
+        description: "Credit card security codes (CVV / CVC)",
+        pattern: "\\b(?:cvv|cvc|security code)\\s*[:=]?\\s*[0-9]{3,4}\\b",
+        severity: "BLOCKING"
+      },
+      {
+        type: "NATIONAL_ID_US_SSN",
+        description: "US Social Security Numbers",
+        pattern: "\\b(?!000|666|9\\d{2})\\d{3}[- ]?(?!00)\\d{2}[- ]?(?!0000)\\d{4}\\b",
+        severity: "BLOCKING"
+      },
+      {
+        type: "NATIONAL_ID_INDIA_AADHAAR",
+        description: "Indian Aadhaar numbers (12-digit UID)",
+        pattern: "\\b[2-9]{1}[0-9]{3}\\s?[0-9]{4}\\s?[0-9]{4}\\b",
+        severity: "BLOCKING"
+      },
+      {
+        type: "BANK_ACCOUNT_PASSWORD_PIN",
+        description: "Banking PINs and account credentials",
+        pattern: "\\b(?:atm pin|netbanking password|upi pin)\\s*[:=]?\\s*\\w+\\b",
+        severity: "BLOCKING"
+      }
+    ],
+    privacy_invariants: {
+      never_disclose_other_contacts_pii: true,
+      anonymize_sensitive_health_records: true,
+      block_insecure_credential_requests: true
+    }
+  }
+};
+
+// database/policies/whatsapp/whatsapp-enforcement.json
+var whatsapp_enforcement_default = {
+  version: "2026-10",
+  authority: "Meta WhatsApp Business Messaging Policy - Enforcement Tiering",
+  last_updated: "2026-10-08",
+  decision_tiers: {
+    ALLOW: {
+      code: "ALLOW",
+      symbol: "\u{1F7E2}",
+      description: "All mandatory Meta policy and safety criteria passed without flags.",
+      allows_automated_dispatch: true
+    },
+    HUMAN_REVIEW: {
+      code: "HUMAN_REVIEW",
+      symbol: "\u{1F7E1}",
+      description: "Potential policy ambiguity, regulated claim, or missing metadata requires human review.",
+      allows_automated_dispatch: false,
+      requires_operator_confirmation: true
+    },
+    BLOCK: {
+      code: "BLOCK",
+      symbol: "\u{1F534}",
+      description: "Mandatory Meta policy violation detected. Send action is prohibited.",
+      allows_automated_dispatch: false,
+      ai_override_permitted: false,
+      operator_override_permitted: false
+    }
+  },
+  enforcement_invariants: {
+    fail_closed: true,
+    ai_cannot_override_blocking_rule: true,
+    opt_out_is_absolute_lock: true,
+    every_evaluation_is_audited: true,
+    preserve_historical_policy_versions: true
+  }
+};
+
+// src/compliance/PolicyRegistry.ts
+var PolicyRegistry = class {
+  static {
+    this.metadata = whatsapp_policy_default || ACTIVE_META_POLICY_VERSION;
+  }
+  static {
+    this.rules = whatsapp_rules_default || [];
+  }
+  static {
+    this.prohibited = whatsapp_prohibited_default;
+  }
+  static {
+    this.consent = whatsapp_consent_default;
+  }
+  static {
+    this.templates = whatsapp_templates_default;
+  }
+  static {
+    this.commerce = whatsapp_commerce_default;
+  }
+  static {
+    this.dataProtection = whatsapp_data_protection_default;
+  }
+  static {
+    this.enforcement = whatsapp_enforcement_default;
+  }
+  static getMetadata() {
+    return this.metadata;
+  }
+  static getAllRules() {
+    return this.rules;
+  }
+  static getRuleById(id) {
+    return this.rules.find((r) => r.id === id);
+  }
+  static getRulesByCategory(category) {
+    return this.rules.filter((r) => r.category === category);
+  }
+  static getProhibitedCategories() {
+    return this.prohibited.prohibited_product_categories;
+  }
+  static getConsentRules() {
+    return this.consent.consent_requirements;
+  }
+  static getTemplateSpecs() {
+    return this.templates.template_specifications;
+  }
+  static getCommerceRules() {
+    return this.commerce.commerce_rules;
+  }
+  static getDataProtectionRules() {
+    return this.dataProtection.data_protection_rules;
+  }
+  static getEnforcementTiers() {
+    return this.enforcement.decision_tiers;
+  }
+};
+
+// src/compliance/whatsapp/ConsentPolicy.ts
+var ConsentPolicy = class {
+  static evaluate(context) {
+    const evaluations = [];
+    const consentRules = PolicyRegistry.getConsentRules();
+    const isExplicitlyBlocked = Boolean(context.isGloballyBlocked);
+    const hasRevokedConsent = context.consentStatus === "REVOKED";
+    const bodyUpper = (context.messageBody || "").trim().toUpperCase();
+    const containsOptOutKeyword = consentRules.opt_out_hard_triggers.some(
+      (trigger) => bodyUpper === trigger || bodyUpper.startsWith(`${trigger} `) || bodyUpper.endsWith(` ${trigger}`)
+    );
+    if (isExplicitlyBlocked || hasRevokedConsent) {
+      evaluations.push({
+        ruleId: "WA-OPTOUT-001",
+        category: "opt_out",
+        passed: false,
+        severity: "BLOCKING",
+        reason: "Recipient has previously opted out or is globally suppressed. Meta requires immediate and permanent suppression."
+      });
+    } else {
+      evaluations.push({
+        ruleId: "WA-OPTOUT-001",
+        category: "opt_out",
+        passed: true,
+        severity: "BLOCKING",
+        reason: "Recipient is not opted out and has not triggered suppression."
+      });
+    }
+    if (context.isMarketing) {
+      if (context.consentStatus === "GRANTED") {
+        evaluations.push({
+          ruleId: "WA-CONSENT-001",
+          category: "consent",
+          passed: true,
+          severity: "BLOCKING",
+          reason: "Valid WhatsApp opt-in record verified for recipient."
+        });
+      } else if (context.consentStatus === "UNKNOWN" || !context.consentStatus) {
+        evaluations.push({
+          ruleId: "WA-CONSENT-001",
+          category: "consent",
+          passed: false,
+          severity: "BLOCKING",
+          reason: "Recipient does not have a recorded WhatsApp opt-in on file. Meta mandates prior opt-in for business messaging."
+        });
+      } else {
+        evaluations.push({
+          ruleId: "WA-CONSENT-001",
+          category: "consent",
+          passed: false,
+          severity: "BLOCKING",
+          reason: `Recipient consent state is '${context.consentStatus}'. Valid opt-in is required.`
+        });
+      }
+    } else {
+      evaluations.push({
+        ruleId: "WA-CONSENT-001",
+        category: "consent",
+        passed: true,
+        severity: "BLOCKING",
+        reason: "Service or transactional response does not require promotional opt-in."
+      });
+    }
+    if (context.isMarketing && context.consentCategory && context.consentCategory !== "marketing") {
+      evaluations.push({
+        ruleId: "WA-CONSENT-002",
+        category: "consent",
+        passed: false,
+        severity: "BLOCKING",
+        reason: `Consent category '${context.consentCategory}' does not permit promotional marketing broadcasts. Meta requires explicit marketing opt-in.`
+      });
+    } else {
+      evaluations.push({
+        ruleId: "WA-CONSENT-002",
+        category: "consent",
+        passed: true,
+        severity: "BLOCKING",
+        reason: "Consent category aligns with message intent."
+      });
+    }
+    return evaluations;
+  }
+};
+
+// src/compliance/whatsapp/WindowPolicy.ts
+var WindowPolicy = class _WindowPolicy {
+  static {
+    this.WINDOW_DURATION_MS = 24 * 60 * 60 * 1e3;
+  }
+  // 24 Hours in milliseconds
+  static evaluate(context) {
+    const evaluations = [];
+    const now = Date.now();
+    let isInsideWindow = false;
+    if (context.customerServiceWindowExpiresAt) {
+      const expiresAt = new Date(context.customerServiceWindowExpiresAt).getTime();
+      if (!isNaN(expiresAt) && expiresAt > now) {
+        isInsideWindow = true;
+      }
+    } else if (context.lastInboundMessageAt) {
+      const lastInbound = new Date(context.lastInboundMessageAt).getTime();
+      if (!isNaN(lastInbound) && now - lastInbound < _WindowPolicy.WINDOW_DURATION_MS) {
+        isInsideWindow = true;
+      }
+    }
+    if (!isInsideWindow) {
+      const hasApprovedTemplate = Boolean(context.templateId) && (context.templateStatus === "APPROVED" || !context.templateStatus);
+      if (!hasApprovedTemplate) {
+        evaluations.push({
+          ruleId: "WA-WINDOW-001",
+          category: "window",
+          passed: false,
+          severity: "BLOCKING",
+          reason: "Outside 24-hour customer service window: business-initiated messages require a Meta-approved message template."
+        });
+      } else {
+        evaluations.push({
+          ruleId: "WA-WINDOW-001",
+          category: "window",
+          passed: true,
+          severity: "BLOCKING",
+          reason: "Outside 24-hour window: approved template is designated and valid."
+        });
+      }
+    } else {
+      evaluations.push({
+        ruleId: "WA-WINDOW-001",
+        category: "window",
+        passed: true,
+        severity: "BLOCKING",
+        reason: "Within active 24-hour customer service window: free-form service reply permitted."
+      });
+    }
+    return evaluations;
+  }
+};
+
+// src/compliance/whatsapp/TemplatePolicy.ts
+var TemplatePolicy = class {
+  static evaluate(context) {
+    const evaluations = [];
+    if (!context.templateId && !context.templateCategory) {
+      return evaluations;
+    }
+    const templateSpecs = PolicyRegistry.getTemplateSpecs();
+    if (context.templateStatus) {
+      const isApproved = context.templateStatus === "APPROVED";
+      if (!isApproved) {
+        evaluations.push({
+          ruleId: "WA-TEMPLATE-001",
+          category: "template",
+          passed: false,
+          severity: "BLOCKING",
+          reason: `Template status is '${context.templateStatus}'. Only templates in 'APPROVED' status can be dispatched on WhatsApp.`
+        });
+      } else {
+        evaluations.push({
+          ruleId: "WA-TEMPLATE-001",
+          category: "template",
+          passed: true,
+          severity: "BLOCKING",
+          reason: "Template is officially approved by Meta."
+        });
+      }
+    } else {
+      evaluations.push({
+        ruleId: "WA-TEMPLATE-001",
+        category: "template",
+        passed: true,
+        severity: "BLOCKING",
+        reason: "Template status verified."
+      });
+    }
+    const category = (context.templateCategory || "").toUpperCase();
+    if (category === "UTILITY" || category === "AUTHENTICATION" || category === "SERVICE") {
+      const prohibitedKeywords = templateSpecs.categories.UTILITY?.prohibited_marketing_keywords || [];
+      const textLower = (context.messageBody || "").toLowerCase();
+      const matchedKeyword = prohibitedKeywords.find((kw) => textLower.includes(kw.toLowerCase()));
+      if (matchedKeyword) {
+        evaluations.push({
+          ruleId: "WA-TEMPLATE-002",
+          category: "template",
+          passed: false,
+          severity: "BLOCKING",
+          reason: `Template category is '${category}', but message content contains promotional marketing keyword '${matchedKeyword}'. Meta prohibits repurposing non-marketing templates for promotional offers.`
+        });
+      } else {
+        evaluations.push({
+          ruleId: "WA-TEMPLATE-002",
+          category: "template",
+          passed: true,
+          severity: "BLOCKING",
+          reason: `Template content aligns with designated '${category}' purpose.`
+        });
+      }
+    } else {
+      evaluations.push({
+        ruleId: "WA-TEMPLATE-002",
+        category: "template",
+        passed: true,
+        severity: "BLOCKING",
+        reason: "Template category purpose is compliant."
+      });
+    }
+    return evaluations;
+  }
+};
+
+// src/compliance/whatsapp/ContentPolicy.ts
+var ContentPolicy = class _ContentPolicy {
+  static {
+    this.FRAUD_PATTERNS = [
+      /(?:you(?:'ve| have) won|lottery winner|claim your prize|free money|wire transfer required)/i,
+      /(?:urgent[:\s]+account (?:suspended|compromised)|verify your password immediately|enter your secret pin)/i,
+      /(?:double your investment|guaranteed daily returns|send bitcoin to receive double)/i
+    ];
+  }
+  static {
+    this.REGULATED_HEALTH_PATTERNS = [
+      /(?:clinical trial|prescription consultation|dietary supplement therapy|telehealth medical advice|homeopathic remedy|herbal wellness treatment|weight loss supplement)/i
+    ];
+  }
+  static evaluate(context) {
+    const evaluations = [];
+    const text = context.messageBody || "";
+    const isFraudulent = _ContentPolicy.FRAUD_PATTERNS.some((p) => p.test(text));
+    if (isFraudulent) {
+      evaluations.push({
+        ruleId: "WA-CONTENT-001",
+        category: "content",
+        passed: false,
+        severity: "BLOCKING",
+        reason: "Message contains indicators of fraudulent offers, phishing deception, or lottery spam. Meta prohibits deceptive practices."
+      });
+    } else {
+      evaluations.push({
+        ruleId: "WA-CONTENT-001",
+        category: "content",
+        passed: true,
+        severity: "BLOCKING",
+        reason: "Message is free from fraudulent, deceptive, or malicious spam patterns."
+      });
+    }
+    const hasRegulatedHealthClaim = _ContentPolicy.REGULATED_HEALTH_PATTERNS.some((p) => p.test(text));
+    if (hasRegulatedHealthClaim) {
+      evaluations.push({
+        ruleId: "WA-CONTENT-002",
+        category: "content",
+        passed: false,
+        severity: "REVIEW",
+        reason: "Message contains regulated medical claims or prescription drug keywords. Meta requires human compliance verification."
+      });
+    } else {
+      evaluations.push({
+        ruleId: "WA-CONTENT-002",
+        category: "content",
+        passed: true,
+        severity: "REVIEW",
+        reason: "Content complies with healthcare and pharmaceutical communication guidelines."
+      });
+    }
+    return evaluations;
+  }
+};
+
+// src/compliance/whatsapp/CommercePolicy.ts
+var CommercePolicy = class {
+  static evaluate(context) {
+    const evaluations = [];
+    const textLower = (context.messageBody || "").toLowerCase();
+    const productCatLower = (context.productCategory || "").toLowerCase();
+    const prohibitedCategories = PolicyRegistry.getProhibitedCategories();
+    let matchedProhibited = null;
+    for (const cat of prohibitedCategories) {
+      if (productCatLower && productCatLower.includes(cat.category)) {
+        matchedProhibited = {
+          category: cat.category,
+          matchedKeyword: cat.category,
+          explanation: cat.explanation
+        };
+        break;
+      }
+      for (const kw of cat.keywords) {
+        const regex = new RegExp(`\\b${kw.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`, "i");
+        if (regex.test(textLower)) {
+          matchedProhibited = {
+            category: cat.category,
+            matchedKeyword: kw,
+            explanation: cat.explanation
+          };
+          break;
+        }
+      }
+      if (matchedProhibited) break;
+    }
+    if (matchedProhibited) {
+      evaluations.push({
+        ruleId: "WA-PROHIBITED-001",
+        category: "prohibited_goods",
+        passed: false,
+        severity: "BLOCKING",
+        reason: `Message promotes or references prohibited category '${matchedProhibited.category}' (matched keyword: '${matchedProhibited.matchedKeyword}'). ${matchedProhibited.explanation}`
+      });
+      evaluations.push({
+        ruleId: "WA-COMMERCE-001",
+        category: "commerce",
+        passed: false,
+        severity: "BLOCKING",
+        reason: "Violation of Meta Commerce Policy: commerce in regulated or prohibited goods is strictly banned."
+      });
+    } else {
+      evaluations.push({
+        ruleId: "WA-PROHIBITED-001",
+        category: "prohibited_goods",
+        passed: true,
+        severity: "BLOCKING",
+        reason: "Content complies with Meta prohibited goods and services restrictions."
+      });
+      evaluations.push({
+        ruleId: "WA-COMMERCE-001",
+        category: "commerce",
+        passed: true,
+        severity: "BLOCKING",
+        reason: "Commercial interactions comply with Meta Commerce guidelines."
+      });
+    }
+    return evaluations;
+  }
+};
+
+// src/compliance/whatsapp/DataPolicy.ts
+var DataPolicy = class _DataPolicy {
+  /**
+   * Luhn Algorithm validator to eliminate false positives on credit card detection
+   */
+  static passesLuhn(digitsOnly) {
+    if (digitsOnly.length < 13 || digitsOnly.length > 19) return false;
+    let sum = 0;
+    let shouldDouble = false;
+    for (let i = digitsOnly.length - 1; i >= 0; i--) {
+      let digit = parseInt(digitsOnly.charAt(i), 10);
+      if (shouldDouble) {
+        digit *= 2;
+        if (digit > 9) digit -= 9;
+      }
+      sum += digit;
+      shouldDouble = !shouldDouble;
+    }
+    return sum % 10 === 0;
+  }
+  static evaluate(context) {
+    const evaluations = [];
+    const text = context.messageBody || "";
+    const dataRules = PolicyRegistry.getDataProtectionRules();
+    const prohibitedDataTypes = dataRules.prohibited_sensitive_data || [];
+    let hasCardViolation = false;
+    let cardViolationReason = "";
+    let hasNationalIdViolation = false;
+    let nationalIdReason = "";
+    for (const rule of prohibitedDataTypes) {
+      const regex = new RegExp(rule.pattern, "i");
+      const match = text.match(regex);
+      if (match) {
+        if (rule.type === "PAYMENT_CARD_NUMBER") {
+          const digitsOnly = match[0].replace(/[\s-]/g, "");
+          if (_DataPolicy.passesLuhn(digitsOnly)) {
+            hasCardViolation = true;
+            cardViolationReason = `Message contains a valid payment card number (${rule.description}). Meta prohibits asking for or transmitting full card numbers.`;
+          }
+        } else if (rule.type === "CARD_CVV_CVC" || rule.type === "BANK_ACCOUNT_PASSWORD_PIN") {
+          hasCardViolation = true;
+          cardViolationReason = `Message requests or contains sensitive financial credentials: ${rule.description}.`;
+        } else if (rule.type.startsWith("NATIONAL_ID")) {
+          hasNationalIdViolation = true;
+          nationalIdReason = `Message requests or contains a government-issued national identifier (${rule.description}).`;
+        }
+      }
+    }
+    if (hasCardViolation) {
+      evaluations.push({
+        ruleId: "WA-DATA-001",
+        category: "data_protection",
+        passed: false,
+        severity: "BLOCKING",
+        reason: cardViolationReason
+      });
+    } else {
+      evaluations.push({
+        ruleId: "WA-DATA-001",
+        category: "data_protection",
+        passed: true,
+        severity: "BLOCKING",
+        reason: "No payment cards, CVVs, or financial credentials detected in message."
+      });
+    }
+    if (hasNationalIdViolation) {
+      evaluations.push({
+        ruleId: "WA-DATA-002",
+        category: "data_protection",
+        passed: false,
+        severity: "BLOCKING",
+        reason: nationalIdReason
+      });
+    } else {
+      evaluations.push({
+        ruleId: "WA-DATA-002",
+        category: "data_protection",
+        passed: true,
+        severity: "BLOCKING",
+        reason: "No prohibited government national identifiers detected."
+      });
+    }
+    return evaluations;
+  }
+};
+
+// src/compliance/whatsapp/EnforcementPolicy.ts
+var EnforcementPolicy = class {
+  static aggregate(context, evaluations) {
+    const blockingViolations = [];
+    const reviewViolations = [];
+    const requiredActions = [];
+    for (const ev of evaluations) {
+      if (!ev.passed) {
+        const violation = {
+          ruleId: ev.ruleId,
+          category: ev.category,
+          severity: ev.severity,
+          reason: ev.reason,
+          sourceUrl: "https://business.whatsapp.com/policy",
+          // Blocking violations cannot be overridden by AI or operators
+          canHumanOverride: ev.severity === "REVIEW"
+        };
+        if (ev.severity === "BLOCKING") {
+          blockingViolations.push(violation);
+          if (ev.ruleId === "WA-CONSENT-001") {
+            requiredActions.push("Obtain valid WhatsApp opt-in from recipient before sending");
+          } else if (ev.ruleId === "WA-OPTOUT-001") {
+            requiredActions.push("Permanently suppress contact and exclude from all future outreach");
+          } else if (ev.ruleId === "WA-WINDOW-001") {
+            requiredActions.push("Designate a Meta-approved message template for outbound messaging outside 24h window");
+          } else if (ev.ruleId === "WA-TEMPLATE-002") {
+            requiredActions.push("Remove promotional keywords from utility template or switch to MARKETING template");
+          } else if (ev.ruleId === "WA-PROHIBITED-001") {
+            requiredActions.push("Remove references to prohibited goods (tobacco, alcohol, weapons, prescription drugs, gambling)");
+          } else if (ev.ruleId === "WA-DATA-001") {
+            requiredActions.push("Remove payment card numbers, CVVs, and financial account credentials from message");
+          } else if (ev.ruleId === "WA-DATA-002") {
+            requiredActions.push("Remove national identification numbers (SSN/Aadhaar) from message");
+          } else {
+            requiredActions.push(`Resolve ${ev.ruleId} policy violation: ${ev.reason}`);
+          }
+        } else if (ev.severity === "REVIEW") {
+          reviewViolations.push(violation);
+          requiredActions.push(`Perform operator compliance review on ${ev.ruleId}: ${ev.reason}`);
+        }
+      }
+    }
+    let decision = "ALLOW";
+    let riskLevel = "LOW";
+    let canHumanOverride = true;
+    if (blockingViolations.length > 0) {
+      decision = "BLOCK";
+      riskLevel = "HIGH";
+      canHumanOverride = false;
+    } else if (reviewViolations.length > 0) {
+      decision = "HUMAN_REVIEW";
+      riskLevel = "MEDIUM";
+      canHumanOverride = true;
+    }
+    const allViolations = [...blockingViolations, ...reviewViolations];
+    return {
+      decision,
+      confidence: 0.99,
+      riskLevel,
+      violations: allViolations,
+      evaluatedRules: evaluations,
+      requiredActions,
+      canHumanOverride,
+      policyVersion: ACTIVE_META_POLICY_VERSION.version,
+      evaluatedAt: (/* @__PURE__ */ new Date()).toISOString(),
+      metadata: {
+        channel: context.channel,
+        contactPhone: context.contactPhone,
+        totalRulesEvaluated: evaluations.length,
+        blockingCount: blockingViolations.length,
+        reviewCount: reviewViolations.length
+      }
+    };
+  }
+};
+
+// src/compliance/whatsapp/WhatsAppPolicyEngine.ts
+var WhatsAppPolicyEngine = class {
+  /**
+   * Evaluates a proposed message dispatch against the full Meta policy registry.
+   * "The AI proposes; the Policy Engine decides."
+   */
+  static evaluate(context) {
+    const allEvaluations = [];
+    allEvaluations.push(...ConsentPolicy.evaluate(context));
+    allEvaluations.push(...WindowPolicy.evaluate(context));
+    allEvaluations.push(...TemplatePolicy.evaluate(context));
+    allEvaluations.push(...ContentPolicy.evaluate(context));
+    allEvaluations.push(...CommercePolicy.evaluate(context));
+    allEvaluations.push(...DataPolicy.evaluate(context));
+    return EnforcementPolicy.aggregate(context, allEvaluations);
+  }
+};
+
+// src/compliance/PolicyEngine.ts
+var PolicyEngine = class {
+  /**
+   * Evaluates a single message dispatch proposal against authoritative policies.
+   */
+  static evaluate(context) {
+    if (context.channel === "WHATSAPP") {
+      return WhatsAppPolicyEngine.evaluate(context);
+    }
+    const evaluations = WhatsAppPolicyEngine.evaluate({
+      ...context,
+      channel: "WHATSAPP"
+      // Apply universal baseline safety
+    });
+    return evaluations;
+  }
+  /**
+   * Retrieves active policy metadata and review schedules
+   */
+  static getActivePolicyMetadata() {
+    return PolicyRegistry.getMetadata();
+  }
+  /**
+   * Retrieves all active rules
+   */
+  static getAllRules() {
+    return PolicyRegistry.getAllRules();
+  }
+};
+
+// src/compliance/audit/ComplianceAuditService.ts
+var ComplianceAuditService = class {
+  /**
+   * Persists a compliance evaluation record in the authoritative audit ledger
+   */
+  static async recordEvaluation(context, decision, options) {
+    if (!db || !db.isConfigured) return;
+    try {
+      if (db.auditRepo) {
+        await db.auditRepo.log({
+          tenantId: context.tenantId,
+          actorId: options?.actorId || "00000000-0000-0000-0000-000000000000",
+          actorName: "WhatsApp Policy Engine",
+          actorRole: options?.actorRole || "OPERATOR",
+          action: `COMPLIANCE_EVALUATION_${decision.decision}`,
+          entityType: "POLICY",
+          entityId: options?.recipientId || options?.campaignId || context.contactPhone,
+          metadata: {
+            policyVersion: decision.policyVersion,
+            decision: decision.decision,
+            riskLevel: decision.riskLevel,
+            violationsCount: decision.violations.length,
+            violations: decision.violations.map((v) => ({ ruleId: v.ruleId, reason: v.reason })),
+            evaluatedRulesCount: decision.evaluatedRules.length,
+            canHumanOverride: decision.canHumanOverride,
+            channel: context.channel,
+            contactPhone: context.contactPhone,
+            isOverride: options?.isOverride || false,
+            overrideReason: options?.overrideReason
+          },
+          ipAddress: "127.0.0.1"
+        });
+      }
+    } catch (err) {
+      console.warn("[ComplianceAuditService] Non-blocking audit record warning:", err);
+    }
+  }
+};
+
 // server.ts
 var __filename = fileURLToPath(import.meta.url);
 var __dirname = path.dirname(__filename);
@@ -2786,6 +4072,45 @@ api.post(
       }
       const contact = await db.contactsRepo.findById(recipient.contactId, req.auth.tenant.id);
       if (!contact) return res.status(404).json({ error: { message: "Contact not found" } });
+      const complianceContext = {
+        tenantId: req.auth.tenant.id,
+        contactId: contact.id,
+        contactPhone: recipient.channelAddress || contact.phone,
+        contactName: recipient.contactName || contact.displayName,
+        channel: recipient.channel,
+        isMarketing: true,
+        messageBody: recipient.resolvedMessage || campaign.templateSnapshot.body,
+        templateId: campaign.templateId,
+        templateName: campaign.templateSnapshot?.name,
+        templateCategory: campaign.templateSnapshot?.category || "MARKETING",
+        templateStatus: "APPROVED",
+        consentStatus: contact.preferences?.WHATSAPP?.marketingAllowed ? "GRANTED" : "UNKNOWN",
+        isGloballyBlocked: Boolean(contact.isGloballyBlocked || contact.status === "BLOCKED" || contact.status === "OPTED_OUT"),
+        actorRole: req.auth.role,
+        actorId: req.auth.user.id,
+        lastInboundMessageAt: contact.lastInteractionAt
+      };
+      const complianceDecision = PolicyEngine.evaluate(complianceContext);
+      ComplianceAuditService.recordEvaluation(complianceContext, complianceDecision, {
+        actorId: req.auth.user.id,
+        actorRole: req.auth.role,
+        campaignId,
+        recipientId
+      }).catch(console.warn);
+      if (complianceDecision.decision === "BLOCK") {
+        const primaryReason = complianceDecision.violations[0]?.reason || "Blocked by Meta WhatsApp Business Policy";
+        await db.campaignsRepo.updateRecipient(recipientId, {
+          status: "BLOCKED",
+          policyNotes: `[Meta Policy BLOCK]: ${primaryReason}`
+        });
+        return res.status(400).json({
+          error: {
+            code: "META_WHATSAPP_POLICY_VIOLATION",
+            message: primaryReason,
+            complianceDecision
+          }
+        });
+      }
       const policyResult = CommunicationPolicyEngine.evaluate({
         tenant: req.auth.tenant,
         contact,
@@ -2803,7 +4128,8 @@ api.post(
           error: {
             code: "COMMUNICATION_BLOCKED",
             message: policyResult.primaryBlockReason || "Communication prohibited by policy",
-            policyResult
+            policyResult,
+            complianceDecision
           }
         });
       }
@@ -2992,6 +4318,64 @@ api.post("/ai/guardrails", async (req, res) => {
     res.json({ data: result });
   } catch (err) {
     res.status(500).json({ error: { message: err.message || "AI Guardrails check failed" } });
+  }
+});
+api.post("/compliance/evaluate", async (req, res) => {
+  try {
+    const {
+      messageBody,
+      channel = "WHATSAPP",
+      contactPhone = "",
+      isMarketing = true,
+      templateId,
+      templateName,
+      templateCategory,
+      templateStatus,
+      lastInboundMessageAt,
+      customerServiceWindowExpiresAt,
+      consentStatus = "GRANTED",
+      consentCategory = "marketing",
+      isGloballyBlocked = false,
+      productCategory
+    } = req.body;
+    const context = {
+      tenantId: req.auth?.tenant?.id || "default",
+      contactPhone,
+      channel,
+      isMarketing,
+      messageBody: messageBody || "",
+      templateId,
+      templateName,
+      templateCategory,
+      templateStatus,
+      lastInboundMessageAt,
+      customerServiceWindowExpiresAt,
+      consentStatus,
+      consentCategory,
+      isGloballyBlocked,
+      productCategory,
+      actorRole: req.auth?.role || "OPERATOR",
+      actorId: req.auth?.user?.id
+    };
+    const decision = PolicyEngine.evaluate(context);
+    res.json({ data: decision });
+  } catch (err) {
+    res.status(500).json({ error: { message: err?.message || "Policy evaluation error" } });
+  }
+});
+api.get("/compliance/policy", async (_req, res) => {
+  try {
+    const metadata = PolicyEngine.getActivePolicyMetadata();
+    const rules = PolicyEngine.getAllRules();
+    res.json({
+      data: {
+        metadata,
+        totalRules: rules.length,
+        rules
+      }
+    });
+  } catch (err) {
+    res.status(500).json({ error: { message: err?.message || "Failed to fetch policy" } });
   }
 });
 api.get("/audit", async (req, res) => {

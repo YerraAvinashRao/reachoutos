@@ -1,0 +1,317 @@
+[
+  {
+    "id": "WA-IDENT-001",
+    "category": "identity",
+    "name": "Accurate Business Identity",
+    "severity": "BLOCKING",
+    "applies_to": ["business_app", "business_platform"],
+    "rule": {
+      "condition": "sender_identity_is_verified_and_accurate",
+      "evaluation_type": "IDENTITY_VERIFICATION"
+    },
+    "failure_action": "BLOCK_SEND",
+    "explanation": "Meta requires an accurate Business profile and explicitly prohibits impersonation or misleading business affiliation.",
+    "source": {
+      "authority": "Meta",
+      "document": "WhatsApp Business Messaging Policy",
+      "section": "General Terms & Business Identity",
+      "url": "https://business.whatsapp.com/policy"
+    },
+    "effective_from": "2026-10-08",
+    "review_required": false
+  },
+  {
+    "id": "WA-CONSENT-001",
+    "category": "consent",
+    "name": "Valid WhatsApp Opt-In Required",
+    "severity": "BLOCKING",
+    "applies_to": ["business_app", "business_platform"],
+    "rule": {
+      "condition": "recipient_has_valid_whatsapp_opt_in",
+      "evaluation_type": "CONSENT_VERIFICATION"
+    },
+    "failure_action": "BLOCK_SEND",
+    "explanation": "Recipient must have explicitly opted in to receive WhatsApp messages from this business prior to business-initiated outreach.",
+    "source": {
+      "authority": "Meta",
+      "document": "WhatsApp Business Messaging Policy",
+      "section": "Opt-in Requirements",
+      "url": "https://business.whatsapp.com/policy"
+    },
+    "effective_from": "2026-10-08",
+    "review_required": false
+  },
+  {
+    "id": "WA-CONSENT-002",
+    "category": "consent",
+    "name": "Category-Specific Consent Match",
+    "severity": "BLOCKING",
+    "applies_to": ["business_app", "business_platform"],
+    "rule": {
+      "condition": "consent_category_matches_message_intent",
+      "evaluation_type": "CATEGORY_MATCH"
+    },
+    "failure_action": "BLOCK_SEND",
+    "explanation": "Marketing communications require explicit marketing consent. Transactional or utility consent does not permit promotional broadcasts.",
+    "source": {
+      "authority": "Meta",
+      "document": "WhatsApp Business Messaging Policy",
+      "section": "Opt-in Categories",
+      "url": "https://business.whatsapp.com/policy"
+    },
+    "effective_from": "2026-10-08",
+    "review_required": false
+  },
+  {
+    "id": "WA-OPTOUT-001",
+    "category": "opt_out",
+    "name": "Immediate Opt-Out Hard Enforcement",
+    "severity": "BLOCKING",
+    "applies_to": ["business_app", "business_platform"],
+    "rule": {
+      "condition": "recipient_has_not_opted_out",
+      "evaluation_type": "SUPPRESSION_CHECK"
+    },
+    "failure_action": "BLOCK_SEND",
+    "explanation": "Meta mandates that requests to stop, block, or opt-out must be immediately honored across all channels. AI cannot override opt-outs.",
+    "source": {
+      "authority": "Meta",
+      "document": "WhatsApp Business Messaging Policy",
+      "section": "Opt-out & User Control",
+      "url": "https://business.whatsapp.com/policy"
+    },
+    "effective_from": "2026-10-08",
+    "review_required": false
+  },
+  {
+    "id": "WA-WINDOW-001",
+    "category": "window",
+    "name": "24-Hour Customer Service Window Enforcement",
+    "severity": "BLOCKING",
+    "applies_to": ["business_platform"],
+    "rule": {
+      "condition": "business_initiated_outside_window_requires_template",
+      "evaluation_type": "WINDOW_CALCULATION"
+    },
+    "failure_action": "BLOCK_SEND",
+    "explanation": "Outside the 24-hour customer service window following the user's last inbound message, business-initiated messages require an approved template.",
+    "source": {
+      "authority": "Meta",
+      "document": "WhatsApp Business Messaging Policy",
+      "section": "Customer Care Window & Message Templates",
+      "url": "https://business.whatsapp.com/policy"
+    },
+    "effective_from": "2026-10-08",
+    "review_required": false
+  },
+  {
+    "id": "WA-TEMPLATE-001",
+    "category": "template",
+    "name": "Approved Template Status Required",
+    "severity": "BLOCKING",
+    "applies_to": ["business_platform"],
+    "rule": {
+      "condition": "template_is_approved_by_meta",
+      "evaluation_type": "TEMPLATE_STATUS"
+    },
+    "failure_action": "BLOCK_SEND",
+    "explanation": "Outbound broadcast messages outside active 24-hour service windows must use a pre-approved template with active status.",
+    "source": {
+      "authority": "Meta",
+      "document": "WhatsApp Business Messaging Policy",
+      "section": "Template Approval & Guidelines",
+      "url": "https://business.whatsapp.com/policy"
+    },
+    "effective_from": "2026-10-08",
+    "review_required": false
+  },
+  {
+    "id": "WA-TEMPLATE-002",
+    "category": "template",
+    "name": "Template Purpose Integrity",
+    "severity": "BLOCKING",
+    "applies_to": ["business_app", "business_platform"],
+    "rule": {
+      "condition": "template_purpose_matches_content",
+      "evaluation_type": "INTENT_INTEGRITY"
+    },
+    "failure_action": "BLOCK_SEND",
+    "explanation": "Approved templates must only be used for their designated category. Repurposing a utility/service template for promotional marketing is prohibited.",
+    "source": {
+      "authority": "Meta",
+      "document": "WhatsApp Business Messaging Policy",
+      "section": "Template Categories & Prohibited Misuse",
+      "url": "https://business.whatsapp.com/policy"
+    },
+    "effective_from": "2026-10-08",
+    "review_required": false
+  },
+  {
+    "id": "WA-CONTENT-001",
+    "category": "content",
+    "name": "Spam, Deception & Fraud Prevention",
+    "severity": "BLOCKING",
+    "applies_to": ["business_app", "business_platform"],
+    "rule": {
+      "condition": "content_is_free_from_spam_fraud_deception",
+      "evaluation_type": "CONTENT_SCAN"
+    },
+    "failure_action": "BLOCK_SEND",
+    "explanation": "Meta strictly prohibits spam, misleading claims, phishing, fraudulent offers, and unsolicited bulk distribution.",
+    "source": {
+      "authority": "Meta",
+      "document": "WhatsApp Business Messaging Policy",
+      "section": "Acceptable Use & Anti-Spam",
+      "url": "https://business.whatsapp.com/policy"
+    },
+    "effective_from": "2026-10-08",
+    "review_required": false
+  },
+  {
+    "id": "WA-CONTENT-002",
+    "category": "content",
+    "name": "Medical & Health Claim Restrictions",
+    "severity": "REVIEW",
+    "applies_to": ["business_app", "business_platform"],
+    "rule": {
+      "condition": "health_claims_require_compliance_review",
+      "evaluation_type": "HEALTH_CLAIM_SCAN"
+    },
+    "failure_action": "REQUIRE_HUMAN_REVIEW",
+    "explanation": "Unsubstantiated or miraculous medical claims, pharmaceutical sales without prescription, or health guarantees trigger mandatory human compliance review.",
+    "source": {
+      "authority": "Meta",
+      "document": "WhatsApp Business Messaging Policy",
+      "section": "Healthcare & Pharmaceuticals",
+      "url": "https://business.whatsapp.com/policy"
+    },
+    "effective_from": "2026-10-08",
+    "review_required": true
+  },
+  {
+    "id": "WA-PROHIBITED-001",
+    "category": "prohibited_goods",
+    "name": "Prohibited Goods & Services Restrictions",
+    "severity": "BLOCKING",
+    "applies_to": ["business_app", "business_platform"],
+    "rule": {
+      "condition": "content_does_not_promote_prohibited_goods",
+      "evaluation_type": "PROHIBITED_GOODS_SCAN"
+    },
+    "failure_action": "BLOCK_SEND",
+    "explanation": "Meta explicitly prohibits messaging related to weapons, tobacco, alcohol, recreational drugs, illegal items, real-money gambling, or adult content.",
+    "source": {
+      "authority": "Meta",
+      "document": "WhatsApp Business Messaging Policy",
+      "section": "Prohibited Products & Services",
+      "url": "https://business.whatsapp.com/policy"
+    },
+    "effective_from": "2026-10-08",
+    "review_required": false
+  },
+  {
+    "id": "WA-COMMERCE-001",
+    "category": "commerce",
+    "name": "Meta Commerce Policy Integration",
+    "severity": "BLOCKING",
+    "applies_to": ["business_app", "business_platform"],
+    "rule": {
+      "condition": "commerce_interactions_comply_with_meta_commerce_policy",
+      "evaluation_type": "COMMERCE_COMPLIANCE"
+    },
+    "failure_action": "BLOCK_SEND",
+    "explanation": "All catalog items, order confirmations, price quotes, and checkout interactions must strictly comply with the Meta Commerce Policy.",
+    "source": {
+      "authority": "Meta",
+      "document": "Meta Commerce Policy",
+      "section": "Merchant Terms & Product Eligibility",
+      "url": "https://www.facebook.com/policies_center/commerce"
+    },
+    "effective_from": "2026-10-08",
+    "review_required": false
+  },
+  {
+    "id": "WA-DATA-001",
+    "category": "data_protection",
+    "name": "Payment Card & Financial Credential Protection",
+    "severity": "BLOCKING",
+    "applies_to": ["business_app", "business_platform"],
+    "rule": {
+      "condition": "no_credit_card_or_financial_credentials_requested",
+      "evaluation_type": "SENSITIVE_DATA_SCAN"
+    },
+    "failure_action": "BLOCK_SEND",
+    "explanation": "Businesses must never ask customers to share full credit card numbers, CVVs, PINs, or banking account passwords over WhatsApp.",
+    "source": {
+      "authority": "Meta",
+      "document": "WhatsApp Business Messaging Policy",
+      "section": "Data Handling & Customer Privacy",
+      "url": "https://business.whatsapp.com/policy"
+    },
+    "effective_from": "2026-10-08",
+    "review_required": false
+  },
+  {
+    "id": "WA-DATA-002",
+    "category": "data_protection",
+    "name": "National Identification & SSN Shield",
+    "severity": "BLOCKING",
+    "applies_to": ["business_app", "business_platform"],
+    "rule": {
+      "condition": "no_national_id_numbers_collected",
+      "evaluation_type": "PII_SCAN"
+    },
+    "failure_action": "BLOCK_SEND",
+    "explanation": "Meta restricts requesting government-issued national identifiers (e.g. Social Security Numbers, Aadhaar, PAN) via WhatsApp messages.",
+    "source": {
+      "authority": "Meta",
+      "document": "WhatsApp Business Messaging Policy",
+      "section": "Customer Privacy & Sensitive PII",
+      "url": "https://business.whatsapp.com/policy"
+    },
+    "effective_from": "2026-10-08",
+    "review_required": false
+  },
+  {
+    "id": "WA-AUTOMATION-001",
+    "category": "automation",
+    "name": "Human Escalation Path Requirement",
+    "severity": "REVIEW",
+    "applies_to": ["business_platform"],
+    "rule": {
+      "condition": "automation_provides_human_agent_escalation",
+      "evaluation_type": "ESCALATION_CHECK"
+    },
+    "failure_action": "REQUIRE_HUMAN_REVIEW",
+    "explanation": "Automated messaging systems must provide a clear and direct path to escalate to a human agent, web chat, phone, or email support.",
+    "source": {
+      "authority": "Meta",
+      "document": "WhatsApp Business Messaging Policy",
+      "section": "Automated Messaging & Human Escalation",
+      "url": "https://business.whatsapp.com/policy"
+    },
+    "effective_from": "2026-10-08",
+    "review_required": true
+  },
+  {
+    "id": "WA-ENFORCEMENT-001",
+    "category": "enforcement",
+    "name": "Fail Closed Safety Guarantee",
+    "severity": "BLOCKING",
+    "applies_to": ["business_app", "business_platform"],
+    "rule": {
+      "condition": "fail_closed_on_unverified_or_ambiguous_rules",
+      "evaluation_type": "FAIL_CLOSED_ENGINE"
+    },
+    "failure_action": "BLOCK_SEND",
+    "explanation": "If any mandatory compliance check cannot be authoritatively verified against the policy registry, the message must not be sent.",
+    "source": {
+      "authority": "ReachOut OS Core Architecture",
+      "document": "Enterprise Safety Mandate",
+      "section": "Fail Closed Invariant",
+      "url": "https://reachoutos.com/compliance"
+    },
+    "effective_from": "2026-10-08",
+    "review_required": false
+  }
+]

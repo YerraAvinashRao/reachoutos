@@ -1,0 +1,46 @@
+{
+  "version": "2026-10",
+  "authority": "Meta WhatsApp Business Messaging Policy",
+  "last_updated": "2026-10-08",
+  "template_specifications": {
+    "categories": {
+      "MARKETING": {
+        "description": "Messages promoting goods, services, sales, offers, or brand awareness",
+        "allowed_outside_24h_window": true,
+        "requires_meta_approval": true,
+        "requires_marketing_consent": true
+      },
+      "UTILITY": {
+        "description": "Messages related to a specific transaction, order, delivery, or account status",
+        "allowed_outside_24h_window": true,
+        "requires_meta_approval": true,
+        "prohibited_marketing_keywords": [
+          "discount",
+          "promo",
+          "sale",
+          "off today",
+          "buy now",
+          "coupon",
+          "limited offer",
+          "deal of the day"
+        ]
+      },
+      "AUTHENTICATION": {
+        "description": "One-time passcodes and account verification codes",
+        "allowed_outside_24h_window": true,
+        "requires_meta_approval": true,
+        "enforce_copy_code_button": true
+      }
+    },
+    "variable_constraints": {
+      "max_variable_length": 100,
+      "disallow_url_parameters_in_variables": true,
+      "disallow_unresolved_variables": true
+    },
+    "purpose_integrity_rules": {
+      "strict_category_matching": true,
+      "block_utility_hijacking_for_marketing": true,
+      "require_approved_status_to_send": true
+    }
+  }
+}

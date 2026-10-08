@@ -1,0 +1,59 @@
+{
+  "version": "2026-10",
+  "authority": "Meta WhatsApp Business Messaging Policy",
+  "last_updated": "2026-10-08",
+  "consent_requirements": {
+    "opt_in_mandatory": true,
+    "opt_in_must_state_channel": true,
+    "opt_in_must_state_business": true,
+    "valid_consent_channels": [
+      "website_form",
+      "website_checkbox",
+      "inbound_whatsapp_thread",
+      "point_of_sale_form",
+      "sms_confirmation",
+      "ivr_phone",
+      "customer_service_call"
+    ],
+    "consent_categories": {
+      "marketing": {
+        "description": "Promotional offers, seasonal campaigns, discounts, product announcements",
+        "requires_explicit_opt_in": true,
+        "cannot_be_inferred_from_service": true
+      },
+      "utility": {
+        "description": "Order confirmations, delivery updates, account alerts, receipts",
+        "requires_transaction_reference": true
+      },
+      "authentication": {
+        "description": "One-time passwords, two-factor authentication codes",
+        "requires_immediate_dispatch": true
+      },
+      "service": {
+        "description": "Customer care replies within 24-hour inbound window",
+        "does_not_require_pre_approved_template": true
+      }
+    },
+    "opt_out_hard_triggers": [
+      "STOP",
+      "STOPALL",
+      "UNSUBSCRIBE",
+      "CANCEL",
+      "END",
+      "QUIT",
+      "OPT OUT",
+      "OPTOUT",
+      "DON'T MESSAGE ME",
+      "DO NOT MESSAGE",
+      "REMOVE ME",
+      "UNSUB"
+    ],
+    "opt_out_rules": {
+      "hard_system_lock": true,
+      "ai_override_allowed": false,
+      "immediate_suppression": true,
+      "cross_channel_sync": true,
+      "revocation_grace_period_seconds": 0
+    }
+  }
+}

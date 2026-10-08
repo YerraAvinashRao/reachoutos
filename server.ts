@@ -14,6 +14,8 @@ import {
   AuthenticatedRequest
 } from './src/middleware/authMiddleware';
 import { Contact, ChannelType, CampaignRecipient, Role } from './src/types';
+import { PolicyEngine } from './src/compliance/PolicyEngine';
+import { ComplianceAuditService } from './src/compliance/audit/ComplianceAuditService';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -1249,6 +1251,54 @@ api.post(
       const contact = await db.contactsRepo.findById(recipient.contactId, req.auth!.tenant.id);
       if (!contact) return res.status(404).json({ error: { message: 'Contact not found' } });
 
+      // 1. Authoritative Meta WhatsApp Business Policy Evaluation
+      const complianceContext = {
+        tenantId: req.auth!.tenant.id,
+        contactId: contact.id,
+        contactPhone: recipient.channelAddress || contact.phone,
+        contactName: recipient.contactName || contact.displayName,
+        channel: recipient.channel as any,
+        isMarketing: true,
+        messageBody: recipient.resolvedMessage || campaign.templateSnapshot.body,
+        templateId: campaign.templateId,
+        templateName: campaign.templateSnapshot?.name,
+        templateCategory: (campaign.templateSnapshot as any)?.category || 'MARKETING',
+        templateStatus: 'APPROVED',
+        consentStatus: (contact.preferences?.WHATSAPP?.marketingAllowed ? 'GRANTED' : 'UNKNOWN') as any,
+        isGloballyBlocked: Boolean(contact.isGloballyBlocked || contact.status === 'BLOCKED' || contact.status === 'OPTED_OUT'),
+        actorRole: req.auth!.role,
+        actorId: req.auth!.user.id,
+        lastInboundMessageAt: contact.lastInteractionAt
+      };
+
+      const complianceDecision = PolicyEngine.evaluate(complianceContext);
+
+      // Async record audit in background
+      ComplianceAuditService.recordEvaluation(complianceContext, complianceDecision, {
+        actorId: req.auth!.user.id,
+        actorRole: req.auth!.role,
+        campaignId,
+        recipientId
+      }).catch(console.warn);
+
+      // If Meta policy decides BLOCK, prevent dispatch
+      if (complianceDecision.decision === 'BLOCK') {
+        const primaryReason = complianceDecision.violations[0]?.reason || 'Blocked by Meta WhatsApp Business Policy';
+        await db.campaignsRepo.updateRecipient(recipientId, {
+          status: 'BLOCKED',
+          policyNotes: `[Meta Policy BLOCK]: ${primaryReason}`
+        });
+
+        return res.status(400).json({
+          error: {
+            code: 'META_WHATSAPP_POLICY_VIOLATION',
+            message: primaryReason,
+            complianceDecision
+          }
+        });
+      }
+
+      // Also evaluate internal workspace rules (kill switch, landline, missing variables)
       const policyResult = CommunicationPolicyEngine.evaluate({
         tenant: req.auth!.tenant,
         contact,
@@ -1268,7 +1318,8 @@ api.post(
           error: {
             code: 'COMMUNICATION_BLOCKED',
             message: policyResult.primaryBlockReason || 'Communication prohibited by policy',
-            policyResult
+            policyResult,
+            complianceDecision
           }
         });
       }
@@ -1480,6 +1531,69 @@ api.post('/ai/guardrails', async (req: AuthenticatedRequest, res: Response) => {
     res.json({ data: result });
   } catch (err: any) {
     res.status(500).json({ error: { message: err.message || 'AI Guardrails check failed' } });
+  }
+});
+
+// ---------------- 10.5 Meta WhatsApp Policy Compliance Engine ----------------
+api.post('/compliance/evaluate', async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const { 
+      messageBody, 
+      channel = 'WHATSAPP', 
+      contactPhone = '', 
+      isMarketing = true, 
+      templateId,
+      templateName,
+      templateCategory, 
+      templateStatus,
+      lastInboundMessageAt,
+      customerServiceWindowExpiresAt,
+      consentStatus = 'GRANTED',
+      consentCategory = 'marketing',
+      isGloballyBlocked = false,
+      productCategory 
+    } = req.body;
+
+    const context = {
+      tenantId: req.auth?.tenant?.id || 'default',
+      contactPhone,
+      channel: channel as any,
+      isMarketing,
+      messageBody: messageBody || '',
+      templateId,
+      templateName,
+      templateCategory,
+      templateStatus,
+      lastInboundMessageAt,
+      customerServiceWindowExpiresAt,
+      consentStatus: consentStatus as any,
+      consentCategory: consentCategory as any,
+      isGloballyBlocked,
+      productCategory,
+      actorRole: req.auth?.role || 'OPERATOR',
+      actorId: req.auth?.user?.id
+    };
+
+    const decision = PolicyEngine.evaluate(context);
+    res.json({ data: decision });
+  } catch (err: any) {
+    res.status(500).json({ error: { message: err?.message || 'Policy evaluation error' } });
+  }
+});
+
+api.get('/compliance/policy', async (_req: Request, res: Response) => {
+  try {
+    const metadata = PolicyEngine.getActivePolicyMetadata();
+    const rules = PolicyEngine.getAllRules();
+    res.json({
+      data: {
+        metadata,
+        totalRules: rules.length,
+        rules
+      }
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: { message: err?.message || 'Failed to fetch policy' } });
   }
 });
 

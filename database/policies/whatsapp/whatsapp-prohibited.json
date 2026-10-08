@@ -1,0 +1,61 @@
+{
+  "version": "2026-10",
+  "authority": "Meta WhatsApp Business Messaging Policy",
+  "last_updated": "2026-10-08",
+  "prohibited_product_categories": [
+    {
+      "category": "tobacco_and_nicotine",
+      "status": "PROHIBITED",
+      "keywords": ["tobacco", "cigarettes", "cigars", "vape", "e-cigarette", "nicotine", "hookah", "bidi"],
+      "explanation": "Meta strictly prohibits the promotion, sale, or distribution of tobacco and related products."
+    },
+    {
+      "category": "alcohol_and_spirits",
+      "status": "PROHIBITED",
+      "keywords": ["liquor", "spirits", "vodka", "whiskey", "tequila", "beer", "wine sale", "distillery"],
+      "explanation": "Promotion or commercial sale of alcoholic beverages is prohibited in business messaging."
+    },
+    {
+      "category": "weapons_and_ammunition",
+      "status": "PROHIBITED",
+      "keywords": ["firearms", "guns", "pistol", "rifle", "ammunition", "explosives", "fireworks", "knives", "weapons"],
+      "explanation": "Firearms, weapons, ammunition, and explosives are strictly banned from WhatsApp Business messaging."
+    },
+    {
+      "category": "recreational_drugs_and_paraphernalia",
+      "status": "PROHIBITED",
+      "keywords": ["cannabis", "marijuana", "narcotics", "prescription drugs", "pharmaceuticals", "psychedelics", "steroids"],
+      "explanation": "Sale or promotion of illegal, prescription, or recreational drugs and paraphernalia is prohibited."
+    },
+    {
+      "category": "gambling_and_lotteries",
+      "status": "PROHIBITED",
+      "keywords": ["casino", "gambling", "sports betting", "lottery tickets", "poker real money", "bookmaking"],
+      "explanation": "Real-money gambling, sports betting, and lotteries are prohibited on WhatsApp."
+    },
+    {
+      "category": "adult_and_sexually_explicit",
+      "status": "PROHIBITED",
+      "keywords": ["pornography", "escort services", "adult products", "sex toys", "sexually explicit"],
+      "explanation": "Sexually explicit content, pornography, and adult dating services are strictly prohibited."
+    },
+    {
+      "category": "predatory_financial_services",
+      "status": "PROHIBITED",
+      "keywords": ["payday loans", "get rich quick", "pyramid scheme", "multi-level marketing", "crypto pump", "guaranteed returns"],
+      "explanation": "Payday loans, high-interest predatory lending, and deceptive investment schemes violate Meta policy."
+    },
+    {
+      "category": "unsubstantiated_medical_claims",
+      "status": "PROHIBITED",
+      "keywords": ["miracle cure", "100% cure cancer", "guaranteed weight loss in 3 days", "covid cure", "vaccine fake"],
+      "explanation": "Deceptive health claims or guarantees to cure serious medical illnesses are prohibited."
+    },
+    {
+      "category": "counterfeit_and_stolen_goods",
+      "status": "PROHIBITED",
+      "keywords": ["fake rolex", "replica designer", "knockoff", "stolen credentials", "cracked software"],
+      "explanation": "Counterfeit, unauthorized replicas, and stolen digital credentials violate intellectual property policies."
+    }
+  ]
+}

@@ -87,12 +87,39 @@ export const AICopilotView: React.FC<AICopilotViewProps> = ({
     }
   };
 
+  // Compliance Policy Engine state
+  const [complianceDecision, setComplianceDecision] = useState<any>(null);
+  const [policyMetadata, setPolicyMetadata] = useState<any>(null);
+
+  React.useEffect(() => {
+    apiClient.getCompliancePolicy().then(res => {
+      if (res?.data?.metadata) {
+        setPolicyMetadata(res.data.metadata);
+      }
+    }).catch(err => console.error('Failed to load compliance policy metadata', err));
+  }, []);
+
   const handleCheckGuardrails = async () => {
     setLoadingGuardrails(true);
     try {
-      const res = await apiClient.aiGuardrails(currentMessage);
-      if (res?.data) {
-        setGuardrailReport(res.data);
+      const [aiRes, compRes] = await Promise.allSettled([
+        apiClient.aiGuardrails(currentMessage),
+        apiClient.evaluateCompliance({
+          channel: 'WHATSAPP',
+          isMarketing: true,
+          messageBody: currentMessage,
+          consentStatus: 'GRANTED',
+          withinCustomerServiceWindow: false,
+          templateCategory: 'MARKETING',
+          templateStatus: 'APPROVED'
+        })
+      ]);
+
+      if (aiRes.status === 'fulfilled' && aiRes.value?.data) {
+        setGuardrailReport(aiRes.value.data);
+      }
+      if (compRes.status === 'fulfilled' && compRes.value?.data) {
+        setComplianceDecision(compRes.value.data);
       }
     } catch (err) {
       console.error(err);
@@ -471,6 +498,94 @@ export const AICopilotView: React.FC<AICopilotViewProps> = ({
                 </div>
               </div>
             )}
+
+            {/* META WHATSAPP POLICY ENGINE EVALUATION */}
+            <div className="p-4 rounded-xl border border-neutral-200 dark:border-neutral-800 bg-neutral-50/50 dark:bg-neutral-900/50 space-y-3">
+              <div className="flex items-start justify-between gap-2">
+                <div>
+                  <div className="flex items-center gap-2">
+                    <span className="px-2 py-0.5 rounded text-[10px] font-bold tracking-wider uppercase bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20">
+                      Meta Official Authority
+                    </span>
+                    <span className="text-[10px] text-neutral-400">
+                      Policy v{policyMetadata?.version || '2026-10'}
+                    </span>
+                  </div>
+                  <h4 className="font-bold text-neutral-900 dark:text-neutral-100 text-sm mt-1">
+                    Meta WhatsApp Business Policy Engine
+                  </h4>
+                  <p className="text-[11px] text-neutral-500">
+                    Source of truth: <a href="https://business.whatsapp.com/policy" target="_blank" rel="noreferrer" className="text-emerald-600 hover:underline">Meta Official Business Messaging Policy</a>. Invariant: <em>The AI proposes. The policy engine decides.</em>
+                  </p>
+                </div>
+                {complianceDecision && (
+                  <div className={`px-2.5 py-1 rounded-full text-xs font-bold flex items-center gap-1.5 ${
+                    complianceDecision.decision === 'ALLOW'
+                      ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30'
+                      : complianceDecision.decision === 'HUMAN_REVIEW'
+                      ? 'bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/30'
+                      : 'bg-rose-500/10 text-rose-600 dark:text-rose-400 border border-rose-500/30'
+                  }`}>
+                    <span>{complianceDecision.decision === 'ALLOW' ? '🟢' : complianceDecision.decision === 'HUMAN_REVIEW' ? '🟡' : '🔴'}</span>
+                    <span>{complianceDecision.decision}</span>
+                  </div>
+                )}
+              </div>
+
+              {complianceDecision ? (
+                <div className="space-y-2.5 pt-1">
+                  {complianceDecision.violations.length > 0 && (
+                    <div className="p-3 rounded-lg border border-rose-200 dark:border-rose-900/50 bg-rose-50/80 dark:bg-rose-950/20 space-y-1.5">
+                      <div className="text-xs font-bold text-rose-700 dark:text-rose-400 flex items-center gap-1">
+                        <AlertTriangle className="w-3.5 h-3.5" />
+                        Violations Detected ({complianceDecision.violations.length})
+                      </div>
+                      {complianceDecision.violations.map((v: any, idx: number) => (
+                        <div key={idx} className="text-[11px] text-rose-600 dark:text-rose-300">
+                          <span className="font-mono font-bold mr-1.5">[{v.ruleId}]</span>
+                          {v.reason}
+                        </div>
+                      ))}
+                      {complianceDecision.requiredActions?.length > 0 && (
+                        <div className="text-[10px] text-rose-500 pt-1 border-t border-rose-200/50 dark:border-rose-900/30">
+                          <strong>Required Action:</strong> {complianceDecision.requiredActions.join(', ')}
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {/* Rule Evaluation Grid */}
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1">
+                    {complianceDecision.ruleEvaluations?.map((r: any, idx: number) => (
+                      <div
+                        key={idx}
+                        className={`p-2.5 rounded-lg border text-[11px] ${
+                          r.passed
+                            ? 'border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900'
+                            : r.severity === 'BLOCKING'
+                            ? 'border-rose-300 dark:border-rose-900 bg-rose-50/50 dark:bg-rose-950/20'
+                            : 'border-amber-300 dark:border-amber-900 bg-amber-50/50 dark:bg-amber-950/20'
+                        }`}
+                      >
+                        <div className="flex items-center justify-between font-mono font-semibold">
+                          <span className="text-neutral-700 dark:text-neutral-300">{r.ruleId}</span>
+                          <span className={r.passed ? 'text-emerald-600' : r.severity === 'BLOCKING' ? 'text-rose-600' : 'text-amber-600'}>
+                            {r.passed ? '✓ PASSED' : r.severity === 'BLOCKING' ? '✕ BLOCKED' : '⚠ REVIEW'}
+                          </span>
+                        </div>
+                        <p className="text-[10px] text-neutral-500 mt-0.5 line-clamp-2">
+                          {r.reason}
+                        </p>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ) : (
+                <div className="text-[11px] text-neutral-400 italic py-2">
+                  Click "Re-scan Message" above to evaluate this message against the full Meta WhatsApp Business Policy rule suite.
+                </div>
+              )}
+            </div>
           </div>
         </div>
       )}

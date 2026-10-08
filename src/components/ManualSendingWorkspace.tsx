@@ -18,9 +18,13 @@ import {
   Mail,
   AlertCircle,
   RefreshCw,
-  Clock
+  Clock,
+  ShieldCheck,
+  BookOpen
 } from 'lucide-react';
 import { Campaign, CampaignRecipient, Contact, Role } from '../types';
+import { PolicyEngine } from '../compliance/PolicyEngine';
+import { ComplianceDecision } from '../compliance/ComplianceDecision';
 
 interface ManualSendingWorkspaceProps {
   campaign: Campaign;
@@ -70,6 +74,41 @@ export const ManualSendingWorkspace: React.FC<ManualSendingWorkspaceProps> = ({
   const isOpened = currentRecipient?.status === 'OPENED';
   const isSuppressed = currentRecipient?.status === 'BLOCKED' || currentRecipient?.status === 'OPTED_OUT' || currentContact?.isGloballyBlocked;
 
+  // Authoritative Meta WhatsApp Policy Evaluation
+  const complianceDecision: ComplianceDecision = React.useMemo(() => {
+    if (!currentRecipient) {
+      return {
+        decision: 'ALLOW',
+        confidence: 1,
+        riskLevel: 'LOW',
+        violations: [],
+        evaluatedRules: [],
+        requiredActions: [],
+        canHumanOverride: true,
+        policyVersion: '2026-10',
+        evaluatedAt: new Date().toISOString()
+      };
+    }
+
+    return PolicyEngine.evaluate({
+      tenantId: campaign.tenantId || 'default',
+      contactId: currentContact?.id,
+      contactPhone: currentRecipient.channelAddress || currentContact?.phone || '',
+      contactName: currentRecipient.contactName || currentContact?.displayName,
+      channel: currentRecipient.channel,
+      isMarketing: true,
+      messageBody: currentRecipient.resolvedMessage || campaign.templateSnapshot.body,
+      templateId: campaign.templateId,
+      templateName: campaign.templateSnapshot?.name,
+      templateCategory: (campaign.templateSnapshot as any)?.category || 'MARKETING',
+      templateStatus: 'APPROVED',
+      consentStatus: (currentContact?.preferences?.WHATSAPP?.marketingAllowed ? 'GRANTED' : 'UNKNOWN') as any,
+      isGloballyBlocked: Boolean(currentContact?.isGloballyBlocked || isSuppressed),
+      actorRole: userRole,
+      lastInboundMessageAt: currentContact?.lastInteractionAt
+    });
+  }, [currentRecipient, currentContact, campaign, isSuppressed, userRole]);
+
   // Completed metrics
   const total = recipients.length;
   const sentCount = recipients.filter(r => r.status === 'USER_SENT').length;
@@ -108,6 +147,13 @@ export const ManualSendingWorkspace: React.FC<ManualSendingWorkspaceProps> = ({
   // Trigger Open Composer (Opening does NOT mark sent and does NOT advance)
   const handleOpenChannel = useCallback(async () => {
     if (!currentRecipient || userRole === 'VIEWER' || isSuppressed) return;
+
+    // Hard Rule: Meta Policy Engine decides. If BLOCK, prevent dispatch.
+    if (complianceDecision.decision === 'BLOCK') {
+      setPolicyModalOpen(true);
+      return;
+    }
+
     const directUrl = getDeepLinkUrl(currentRecipient);
     if (directUrl) {
       window.open(directUrl, '_blank', 'noopener,noreferrer');
@@ -118,7 +164,7 @@ export const ManualSendingWorkspace: React.FC<ManualSendingWorkspaceProps> = ({
     } catch (err: any) {
       console.warn('onPrepare background sync:', err);
     }
-  }, [currentRecipient, userRole, isSuppressed, getDeepLinkUrl, onPrepare]);
+  }, [currentRecipient, userRole, isSuppressed, complianceDecision, getDeepLinkUrl, onPrepare]);
 
   // Auto-select first active recipient when recipients load or change
   useEffect(() => {
@@ -319,6 +365,28 @@ export const ManualSendingWorkspace: React.FC<ManualSendingWorkspaceProps> = ({
                   <span>READY TO SEND</span>
                 )}
               </span>
+
+              {/* Meta WhatsApp Policy Compliance Badge */}
+              <button
+                onClick={() => setPolicyModalOpen(true)}
+                className={`px-2.5 py-0.5 rounded-full text-xs font-semibold flex items-center gap-1 border transition cursor-pointer ${
+                  complianceDecision.decision === 'ALLOW'
+                    ? 'bg-emerald-50 dark:bg-emerald-950/30 text-emerald-700 dark:text-emerald-400 border-emerald-300 dark:border-emerald-800'
+                    : complianceDecision.decision === 'HUMAN_REVIEW'
+                    ? 'bg-amber-50 dark:bg-amber-950/30 text-amber-700 dark:text-amber-400 border-amber-300 dark:border-amber-800'
+                    : 'bg-rose-50 dark:bg-rose-950/30 text-rose-700 dark:text-rose-400 border-rose-300 dark:border-rose-800'
+                }`}
+                title="Click to view Meta WhatsApp Business Policy compliance evaluation"
+              >
+                <ShieldCheck className="w-3 h-3" />
+                <span>
+                  {complianceDecision.decision === 'ALLOW'
+                    ? 'Meta Safe (v2026-10)'
+                    : complianceDecision.decision === 'HUMAN_REVIEW'
+                    ? 'Meta Review Req'
+                    : 'Meta Policy Blocked'}
+                </span>
+              </button>
             </div>
 
             <div className="flex flex-wrap items-center gap-3 text-xs text-neutral-500">
@@ -348,6 +416,31 @@ export const ManualSendingWorkspace: React.FC<ManualSendingWorkspaceProps> = ({
             ))}
           </div>
         </div>
+
+        {/* Meta WhatsApp Policy Violation Alert */}
+        {complianceDecision.decision === 'BLOCK' && (
+          <div className="p-3.5 rounded-xl border border-rose-300 dark:border-rose-900 bg-rose-50 dark:bg-rose-950/30 text-xs text-rose-900 dark:text-rose-200 space-y-2">
+            <div className="flex items-center justify-between font-bold">
+              <div className="flex items-center gap-2">
+                <AlertCircle className="w-4 h-4 text-rose-600 shrink-0" />
+                <span>Blocked by Meta WhatsApp Business Policy (v2026-10)</span>
+              </div>
+              <button
+                onClick={() => setPolicyModalOpen(true)}
+                className="underline text-[11px] text-rose-700 dark:text-rose-300 hover:text-rose-900 cursor-pointer"
+              >
+                Inspect Violations
+              </button>
+            </div>
+            <div className="text-[11px] leading-relaxed">
+              {complianceDecision.violations[0]?.reason}
+            </div>
+            <div className="text-[10px] font-mono text-rose-700 dark:text-rose-400 flex flex-wrap items-center justify-between gap-2">
+              <span>Rule ID: {complianceDecision.violations[0]?.ruleId} • Account Safety Active</span>
+              <span>Action: {complianceDecision.requiredActions[0] || 'Resolve policy violation'}</span>
+            </div>
+          </div>
+        )}
 
         {/* Guided Banner: Shown when composer is opened, clarifying that message is NOT sent yet */}
         {isOpened && !isSent && (
@@ -525,53 +618,113 @@ export const ManualSendingWorkspace: React.FC<ManualSendingWorkspaceProps> = ({
         </div>
       </div>
 
-      {/* "Why can't I send?" Policy Diagnostic Modal */}
+      {/* Meta WhatsApp Policy Diagnostic Modal */}
       {policyModalOpen && (
-        <div className="fixed inset-0 bg-neutral-950/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="w-full max-w-md bg-white dark:bg-neutral-900 rounded-xl border border-neutral-200 dark:border-neutral-800 shadow-2xl p-5 space-y-4">
+        <div className="fixed inset-0 bg-neutral-950/70 backdrop-blur-md z-50 flex items-center justify-center p-4">
+          <div className="w-full max-w-lg bg-white dark:bg-neutral-900 rounded-2xl border border-neutral-200 dark:border-neutral-800 shadow-2xl p-6 space-y-4 max-h-[85vh] overflow-y-auto">
             <div className="flex items-center justify-between border-b border-neutral-200 dark:border-neutral-800 pb-3">
-              <h3 className="text-sm font-bold text-neutral-900 dark:text-neutral-100 flex items-center gap-1.5">
-                <ShieldAlert className="w-4 h-4 text-rose-500" />
-                <span>Why can't I send? — Policy Diagnostic</span>
-              </h3>
-              <button onClick={() => setPolicyModalOpen(false)} className="text-neutral-400">✕</button>
+              <div className="flex items-center gap-2">
+                <div className={`w-8 h-8 rounded-lg flex items-center justify-center ${
+                  complianceDecision.decision === 'ALLOW' 
+                    ? 'bg-emerald-500/10 text-emerald-600' 
+                    : complianceDecision.decision === 'HUMAN_REVIEW'
+                    ? 'bg-amber-500/10 text-amber-600'
+                    : 'bg-rose-500/10 text-rose-600'
+                }`}>
+                  <ShieldCheck className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-bold text-neutral-900 dark:text-neutral-100">
+                    Meta WhatsApp Policy Engine
+                  </h3>
+                  <div className="text-[11px] text-neutral-500 font-mono">
+                    Official Registry v2026-10 • Meta Platforms, Inc.
+                  </div>
+                </div>
+              </div>
+              <button onClick={() => setPolicyModalOpen(false)} className="text-neutral-400 hover:text-white p-1 rounded">✕</button>
             </div>
 
-            <p className="text-xs text-neutral-500">
-              The deterministic Communication Policy Engine evaluated this recipient against all consent, suppression, and data quality gates:
+            {/* Decision Banner */}
+            <div className={`p-3 rounded-xl border flex items-center justify-between text-xs font-semibold ${
+              complianceDecision.decision === 'ALLOW'
+                ? 'bg-emerald-50 dark:bg-emerald-950/30 border-emerald-300 dark:border-emerald-800 text-emerald-800 dark:text-emerald-300'
+                : complianceDecision.decision === 'HUMAN_REVIEW'
+                ? 'bg-amber-50 dark:bg-amber-950/30 border-amber-300 dark:border-amber-800 text-amber-800 dark:text-amber-300'
+                : 'bg-rose-50 dark:bg-rose-950/30 border-rose-300 dark:border-rose-800 text-rose-800 dark:text-rose-300'
+            }`}>
+              <div className="flex items-center gap-2">
+                <span>Decision Tier:</span>
+                <span className="font-mono uppercase font-bold text-sm tracking-wide">
+                  {complianceDecision.decision}
+                </span>
+              </div>
+              <span className="text-[11px] font-mono opacity-80">
+                Risk: {complianceDecision.riskLevel}
+              </span>
+            </div>
+
+            <p className="text-xs text-neutral-500 leading-relaxed">
+              Every outreach dispatch is strictly validated against the official Meta WhatsApp Business Messaging Policy. AI proposals cannot bypass blocking violations:
             </p>
 
+            {/* Evaluated Meta Rules Breakdown */}
             <div className="space-y-2 text-xs">
-              {policyReasons.length === 0 ? (
-                <div className="p-2.5 rounded bg-rose-50 dark:bg-rose-950/40 text-rose-700 dark:text-rose-400">
-                  {currentRecipient.policyNotes || 'This contact is suppressed or opted out from marketing.'}
-                </div>
-              ) : (
-                policyReasons.map((r, i) => (
-                  <div
-                    key={i}
-                    className={`p-2.5 rounded flex items-start gap-2 ${
-                      r.passed
-                        ? 'bg-emerald-50 dark:bg-emerald-950/30 text-emerald-800 dark:text-emerald-300'
-                        : 'bg-rose-50 dark:bg-rose-950/30 text-rose-800 dark:text-rose-300'
-                    }`}
-                  >
-                    <span className="font-bold text-xs mt-0.5">{r.passed ? '✓' : '✕'}</span>
-                    <div>
-                      <div className="font-semibold text-[11px] font-mono">{r.code}</div>
-                      <div className="text-[11px]">{r.message}</div>
+              {complianceDecision.evaluatedRules.map((r, i) => (
+                <div
+                  key={i}
+                  className={`p-3 rounded-xl border flex items-start gap-2.5 transition ${
+                    r.passed
+                      ? 'bg-neutral-50 dark:bg-neutral-950/50 border-neutral-200 dark:border-neutral-800/80 text-neutral-700 dark:text-neutral-300'
+                      : r.severity === 'BLOCKING'
+                      ? 'bg-rose-50 dark:bg-rose-950/40 border-rose-300 dark:border-rose-900 text-rose-800 dark:text-rose-200'
+                      : 'bg-amber-50 dark:bg-amber-950/40 border-amber-300 dark:border-amber-900 text-amber-800 dark:text-amber-200'
+                  }`}
+                >
+                  <span className={`font-black text-xs shrink-0 mt-0.5 ${
+                    r.passed ? 'text-emerald-600' : r.severity === 'BLOCKING' ? 'text-rose-600' : 'text-amber-600'
+                  }`}>
+                    {r.passed ? '✓' : '✕'}
+                  </span>
+                  <div className="space-y-0.5 flex-1 min-w-0">
+                    <div className="flex items-center justify-between">
+                      <span className="font-mono font-bold text-[11px]">{r.ruleId}</span>
+                      <span className="text-[10px] font-mono uppercase opacity-75">{r.category}</span>
                     </div>
+                    <p className="text-[11px] leading-relaxed">{r.reason}</p>
                   </div>
-                ))
-              )}
+                </div>
+              ))}
             </div>
 
-            <div className="flex justify-end pt-2 border-t border-neutral-200 dark:border-neutral-800">
+            {/* Required Actions / Remediation */}
+            {complianceDecision.requiredActions.length > 0 && (
+              <div className="p-3 rounded-xl bg-neutral-100 dark:bg-neutral-800/60 border border-neutral-200 dark:border-neutral-700 text-xs space-y-1">
+                <span className="font-bold text-neutral-700 dark:text-neutral-300 block">Required Remediation Actions:</span>
+                {complianceDecision.requiredActions.map((action, idx) => (
+                  <div key={idx} className="text-neutral-600 dark:text-neutral-400 pl-3 text-[11px]">
+                    • {action}
+                  </div>
+                ))}
+              </div>
+            )}
+
+            <div className="flex items-center justify-between pt-3 border-t border-neutral-200 dark:border-neutral-800 text-xs">
+              <a
+                href="https://business.whatsapp.com/policy"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-emerald-600 dark:text-emerald-400 hover:underline flex items-center gap-1 text-[11px]"
+              >
+                <span>Meta Official Policy Docs</span>
+                <ExternalLink className="w-3 h-3" />
+              </a>
+
               <button
                 onClick={() => setPolicyModalOpen(false)}
-                className="px-4 py-1.5 rounded bg-neutral-900 dark:bg-white text-white dark:text-neutral-900 font-semibold text-xs"
+                className="px-4 py-1.5 rounded-lg bg-neutral-900 dark:bg-white text-white dark:text-neutral-900 font-semibold text-xs cursor-pointer"
               >
-                Understood
+                Close Diagnostic
               </button>
             </div>
           </div>

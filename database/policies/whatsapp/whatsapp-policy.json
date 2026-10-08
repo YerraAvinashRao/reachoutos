@@ -1,0 +1,22 @@
+{
+  "policy_provider": "Meta / WhatsApp",
+  "policy_family": "WhatsApp Business",
+  "version": "2026-10",
+  "source_type": "official",
+  "authority": "Meta Platforms, Inc.",
+  "official_sources": [
+    "https://business.whatsapp.com/policy",
+    "https://www.whatsapp.com/legal/business-terms/",
+    "https://developers.facebook.com/docs/whatsapp/messaging-limits",
+    "https://www.facebook.com/policies_center/commerce"
+  ],
+  "last_verified_at": "2026-10-08T00:00:00Z",
+  "next_review": "2026-11-08T00:00:00Z",
+  "description": "Authoritative Meta WhatsApp Business Messaging Policy Registry for ReachOut OS. Enforces human-in-the-loop compliance, explicit consent, 24-hour service windows, template purpose integrity, content restrictions, commerce rules, and sensitive data protection.",
+  "engine_principles": [
+    "The AI proposes; the Policy Engine decides.",
+    "Fail closed: if compliance cannot be positively verified, block or flag for human review.",
+    "Hard system controls on opt-outs: irrevocable without explicit compliance admin action.",
+    "Every evaluation generates an immutable audit record referencing the exact policy version and evaluated rule IDs."
+  ]
+}
