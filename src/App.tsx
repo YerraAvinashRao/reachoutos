@@ -29,18 +29,46 @@ export default function App() {
   const [darkMode, setDarkMode] = useState(true);
   const [activeTab, setActiveTab] = useState<NavTab>('dashboard');
 
-  // Public Landing Page view state (defaults to true for new visitors, false for authenticated sessions)
+  // Public Landing Page view state:
+  // When ReachOut is opened, the stunning landing page opens by default!
+  // It only bypasses to workspace if the URL explicitly targets #app or ?app=true or /app.
   const [showLandingPage, setShowLandingPage] = useState<boolean>(() => {
     try {
-      if (typeof window === 'undefined') return false;
+      if (typeof window === 'undefined') return true;
       const params = new URLSearchParams(window.location.search);
-      if (params.get('landing') === 'true' || window.location.hash === '#landing') return true;
-      const hasAuth = Object.keys(localStorage).some(k => k.startsWith('sb-') && k.endsWith('-auth-token'));
-      return !hasAuth;
+      const hash = window.location.hash;
+      const pathname = window.location.pathname;
+
+      if (hash === '#app' || params.get('app') === 'true' || params.get('view') === 'app' || pathname === '/app') {
+        return false;
+      }
+      return true; // Default to opening landing page on root entry
     } catch {
-      return false;
+      return true;
     }
   });
+
+  // Sync Landing Page toggle with browser URL navigation and hash changes
+  useEffect(() => {
+    const handleUrlChange = () => {
+      const params = new URLSearchParams(window.location.search);
+      const hash = window.location.hash;
+      const pathname = window.location.pathname;
+
+      if (hash === '#app' || params.get('app') === 'true' || params.get('view') === 'app' || pathname === '/app') {
+        setShowLandingPage(false);
+      } else if (hash === '#landing' || params.get('landing') === 'true' || (!hash && pathname === '/')) {
+        setShowLandingPage(true);
+      }
+    };
+
+    window.addEventListener('popstate', handleUrlChange);
+    window.addEventListener('hashchange', handleUrlChange);
+    return () => {
+      window.removeEventListener('popstate', handleUrlChange);
+      window.removeEventListener('hashchange', handleUrlChange);
+    };
+  }, []);
 
   // Supabase Database & Auth State
   const [isDatabaseConfigured, setIsDatabaseConfigured] = useState<boolean>(true);
@@ -432,6 +460,9 @@ export default function App() {
         <LandingPageView
           onLaunchApp={() => {
             setShowLandingPage(false);
+            try {
+              window.history.pushState(null, '', '#app');
+            } catch (_) {}
             if (!isAuthenticated) {
               loadData();
             }
@@ -458,7 +489,12 @@ export default function App() {
           onOpenGuide={() => setGuideModalOpen(true)}
           onToggleKillSwitch={() => handleToggleKillSwitch('Toggled via top navigation bar')}
           onSignOut={handleSignOut}
-          onOpenLanding={() => setShowLandingPage(true)}
+          onOpenLanding={() => {
+            setShowLandingPage(true);
+            try {
+              window.history.pushState(null, '', '#landing');
+            } catch (_) {}
+          }}
         />
 
         {/* Upstream Proxy Rate-Limit Notice */}
@@ -657,7 +693,12 @@ export default function App() {
               activeCampaignsCount={campaigns.filter(c => c.status === 'ACTIVE').length}
               user={user}
               onOpenGuide={() => setGuideModalOpen(true)}
-              onOpenLanding={() => setShowLandingPage(true)}
+              onOpenLanding={() => {
+                setShowLandingPage(true);
+                try {
+                  window.history.pushState(null, '', '#landing');
+                } catch (_) {}
+              }}
             />
 
             {/* Main Workspace Stage */}
