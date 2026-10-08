@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { Navbar } from './components/Navbar';
 import { Sidebar, NavTab } from './components/Sidebar';
 import { MobileBottomNav } from './components/MobileBottomNav';
@@ -264,22 +264,34 @@ export default function App() {
   };
 
   const handleToggleBlock = async (contactId: string, reason?: string) => {
-    await apiClient.toggleContactBlock(contactId, reason);
-    await loadData();
+    // 0ms Optimistic UI updates across contacts, campaign recipients, and selected contact
+    setContacts(prev => prev.map(c => c.id === contactId ? { ...c, isGloballyBlocked: !c.isGloballyBlocked } : c));
+    setCampaignRecipients(prev => prev.map(r => r.contactId === contactId ? { ...r, status: 'BLOCKED' } : r));
     if (selectedContact && selectedContact.id === contactId) {
-      const updated = await apiClient.getContact(contactId);
-      if (updated?.contact) setSelectedContact(updated.contact);
-      if (updated?.timeline) setSelectedContactTimeline(updated.timeline);
+      setSelectedContact(prev => prev ? { ...prev, isGloballyBlocked: !prev.isGloballyBlocked } : null);
+    }
+    try {
+      await apiClient.toggleContactBlock(contactId, reason);
+    } catch (err) {
+      console.error('Toggle block error, reverting:', err);
+      setContacts(prev => prev.map(c => c.id === contactId ? { ...c, isGloballyBlocked: !c.isGloballyBlocked } : c));
+      setCampaignRecipients(prev => prev.map(r => r.contactId === contactId ? { ...r, status: 'READY' } : r));
+      if (selectedContact && selectedContact.id === contactId) {
+        setSelectedContact(prev => prev ? { ...prev, isGloballyBlocked: !prev.isGloballyBlocked } : null);
+      }
     }
   };
 
   const handleAddNote = async (contactId: string, note: string) => {
-    await apiClient.addContactNote(contactId, note);
-    await loadData();
+    const timestamp = new Date().toLocaleDateString();
+    setContacts(prev => prev.map(c => c.id === contactId ? { ...c, notes: `${c.notes ? `${c.notes}\n\n` : ''}[${timestamp}] ${note}` } : c));
     if (selectedContact && selectedContact.id === contactId) {
-      const updated = await apiClient.getContact(contactId);
-      if (updated?.contact) setSelectedContact(updated.contact);
-      if (updated?.timeline) setSelectedContactTimeline(updated.timeline);
+      setSelectedContact(prev => prev ? { ...prev, notes: `${prev.notes ? `${prev.notes}\n\n` : ''}[${timestamp}] ${note}` } : null);
+    }
+    try {
+      await apiClient.addContactNote(contactId, note);
+    } catch (err) {
+      console.error('Add note error:', err);
     }
   };
 
@@ -330,33 +342,47 @@ export default function App() {
 
   const selectedCampaign = campaigns.find(c => c.id === selectedCampaignId);
   const [campaignRecipients, setCampaignRecipients] = useState<any[]>([]);
+  const recipientsCacheRef = useRef<Record<string, any[]>>({});
 
   useEffect(() => {
     if (selectedCampaignId) {
-      if (selectedCampaignId.startsWith('temp-')) {
-        // Optimistic campaign: construct recipients instantly from list members
-        const camp = campaigns.find(c => c.id === selectedCampaignId);
-        if (camp) {
+      const camp = campaigns.find(c => c.id === selectedCampaignId);
+      if (camp) {
+        // 1. Check in-memory recipient cache for 0ms instant display
+        const cached = recipientsCacheRef.current[selectedCampaignId];
+        if (cached && cached.length > 0) {
+          setCampaignRecipients(cached);
+        } else {
+          // 2. Synthesize instantly from list contacts so the view is never empty on Frame 1 (0ms)
           const list = lists.find(l => l.id === camp.targetListId);
-          const targetContacts = contacts.filter(c => list?.contactIds.includes(c.id));
-          const optRecipients = targetContacts.map(c => ({
-            id: `opt-rec-${c.id}`,
-            campaignId: camp.id,
-            contactId: c.id,
-            contactName: c.displayName,
-            companyName: c.companyName,
-            channel: camp.channel,
-            channelAddress: camp.channel === 'WHATSAPP' ? c.phone : c.email,
-            resolvedMessage: camp.templateSnapshot.body,
-            status: 'READY' as const,
-            createdAt: new Date().toISOString()
-          }));
-          setCampaignRecipients(optRecipients);
+          const targetContacts = contacts.filter(c => list?.contactIds?.includes(c.id));
+          if (targetContacts.length > 0) {
+            const initialRecipients = targetContacts.map(c => ({
+              id: `rec-${c.id}`,
+              campaignId: camp.id,
+              contactId: c.id,
+              contactName: c.displayName,
+              companyName: c.companyName,
+              channel: camp.channel,
+              channelAddress: camp.channel === 'WHATSAPP' ? c.phone : c.email,
+              resolvedMessage: camp.templateSnapshot?.body || '',
+              status: 'READY' as const,
+              createdAt: new Date().toISOString()
+            }));
+            recipientsCacheRef.current[selectedCampaignId] = initialRecipients;
+            setCampaignRecipients(initialRecipients);
+          }
         }
-      } else {
-        apiClient.getCampaign(selectedCampaignId).then(res => {
-          if (res?.recipients) setCampaignRecipients(res.recipients);
-        });
+
+        // 3. Fetch authoritative database records in background and reconcile
+        if (!selectedCampaignId.startsWith('temp-')) {
+          apiClient.getCampaign(selectedCampaignId).then(res => {
+            if (res?.recipients) {
+              recipientsCacheRef.current[selectedCampaignId] = res.recipients;
+              setCampaignRecipients(res.recipients);
+            }
+          }).catch(console.warn);
+        }
       }
     } else {
       setCampaignRecipients([]);
@@ -588,32 +614,51 @@ export default function App() {
                   onBack={() => setIsSendingWorkspaceOpen(false)}
                   onPrepare={async (recipientId) => {
                     // Split-second optimistic update: instantly show OPENED in UI
-                    setCampaignRecipients(prev => prev.map(r => r.id === recipientId ? { ...r, status: 'OPENED' } : r));
-                    const res = await apiClient.prepareRecipient(selectedCampaign.id, recipientId);
-                    if (res?.resolvedMessage) {
-                      setCampaignRecipients(prev => prev.map(r => r.id === recipientId ? { ...r, status: 'OPENED', resolvedMessage: res.resolvedMessage } : r));
+                    setCampaignRecipients(prev => {
+                      const next = prev.map(r => r.id === recipientId ? { ...r, status: 'OPENED' } : r);
+                      if (selectedCampaign) recipientsCacheRef.current[selectedCampaign.id] = next;
+                      return next;
+                    });
+                    try {
+                      const res = await apiClient.prepareRecipient(selectedCampaign.id, recipientId);
+                      if (res?.resolvedMessage) {
+                        setCampaignRecipients(prev => {
+                          const next = prev.map(r => r.id === recipientId ? { ...r, status: 'OPENED', resolvedMessage: res.resolvedMessage } : r);
+                          if (selectedCampaign) recipientsCacheRef.current[selectedCampaign.id] = next;
+                          return next;
+                        });
+                      }
+                      return res;
+                    } catch (err) {
+                      console.warn('Background prepare error:', err);
                     }
-                    return res;
                   }}
                   onMarkSent={async (recipientId) => {
                     // Split-second optimistic update: instantly mark SENT and increment counter
-                    setCampaignRecipients(prev => prev.map(r => r.id === recipientId ? { ...r, status: 'USER_SENT', sentAt: new Date().toISOString() } : r));
+                    setCampaignRecipients(prev => {
+                      const next = prev.map(r => r.id === recipientId ? { ...r, status: 'USER_SENT', sentAt: new Date().toISOString() } : r);
+                      if (selectedCampaign) recipientsCacheRef.current[selectedCampaign.id] = next;
+                      return next;
+                    });
                     setCampaigns(prev => prev.map(c => c.id === selectedCampaign.id ? { ...c, sentCount: (c.sentCount || 0) + 1 } : c));
                     setStats((prev: any) => prev ? { ...prev, sentToday: (prev.sentToday || 0) + 1 } : prev);
                     // Background persistence - zero UI lag
-                    const res = await apiClient.markRecipientSent(selectedCampaign.id, recipientId);
-                    return res;
+                    return apiClient.markRecipientSent(selectedCampaign.id, recipientId);
                   }}
                   onSkip={async (recipientId, reason) => {
                     // Split-second optimistic update: instantly mark SKIPPED and advance
-                    setCampaignRecipients(prev => prev.map(r => r.id === recipientId ? { ...r, status: 'SKIPPED', errorReason: reason || 'Manually skipped' } : r));
+                    setCampaignRecipients(prev => {
+                      const next = prev.map(r => r.id === recipientId ? { ...r, status: 'SKIPPED', errorReason: reason || 'Manually skipped' } : r);
+                      if (selectedCampaign) recipientsCacheRef.current[selectedCampaign.id] = next;
+                      return next;
+                    });
                     setCampaigns(prev => prev.map(c => c.id === selectedCampaign.id ? { ...c, skippedCount: (c.skippedCount || 0) + 1 } : c));
-                    await apiClient.skipRecipient(selectedCampaign.id, recipientId, reason);
+                    return apiClient.skipRecipient(selectedCampaign.id, recipientId, reason);
                   }}
                   onToggleBlock={handleToggleBlock}
                   onPauseCampaign={async () => {
                     setCampaigns(prev => prev.map(c => c.id === selectedCampaign.id ? { ...c, status: 'PAUSED' } : c));
-                    await apiClient.updateCampaignStatus(selectedCampaign.id, 'PAUSED');
+                    return apiClient.updateCampaignStatus(selectedCampaign.id, 'PAUSED');
                   }}
                   userRole={user?.role || 'VIEWER'}
                 />

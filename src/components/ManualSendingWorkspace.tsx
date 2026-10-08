@@ -118,48 +118,55 @@ export const ManualSendingWorkspace: React.FC<ManualSendingWorkspaceProps> = ({
     }
   }, [currentRecipient, userRole, isSuppressed, getDeepLinkUrl, onPrepare]);
 
-  // Mark Sent: ONLY explicit operator action marks as sent and advances
-  const handleMarkSent = useCallback(async () => {
-    if (!currentRecipient || userRole === 'VIEWER') return;
-    setLoadingAction(true);
-    try {
-      await onMarkSent(currentRecipient.id);
-      advanceToNext();
-    } catch (err) {
-      console.error(err);
-    } finally {
-      setLoadingAction(false);
+  // Auto-select first active recipient when recipients load or change
+  useEffect(() => {
+    if (!selectedRecipientId && recipients.length > 0) {
+      const firstActive = recipients.find(r => r.status === 'READY' || r.status === 'OPENED') || recipients[0];
+      if (firstActive) {
+        setSelectedRecipientId(firstActive.id);
+      }
     }
+  }, [recipients, selectedRecipientId]);
+
+  // Mark Sent: ONLY explicit operator action marks as sent - 0ms instant transition & optimistic queue advancement
+  const handleMarkSent = useCallback(() => {
+    if (!currentRecipient || userRole === 'VIEWER') return;
+    const recipientId = currentRecipient.id;
+    // Advance queue immediately (0ms latency for operator)
+    advanceToNext();
+    // Persist to server and database in background
+    onMarkSent(recipientId).catch((err: any) => {
+      console.error('Background mark sent error:', err);
+    });
   }, [currentRecipient, userRole, onMarkSent, advanceToNext]);
 
-  // Skip and advance
-  const handleSkip = useCallback(async () => {
+  // Skip and advance instantly in 0ms
+  const handleSkip = useCallback(() => {
     if (!currentRecipient || userRole === 'VIEWER') return;
-    setLoadingAction(true);
-    try {
-      await onSkip(currentRecipient.id, 'Manually skipped in focus workspace');
-      advanceToNext();
-    } catch (err) {
-      console.error(err);
-    } finally {
-      setLoadingAction(false);
-    }
+    const recipientId = currentRecipient.id;
+    // Advance queue immediately
+    advanceToNext();
+    // Persist skip in background
+    onSkip(recipientId, 'Manually skipped in focus workspace').catch((err: any) => {
+      console.error('Background skip error:', err);
+    });
   }, [currentRecipient, userRole, onSkip, advanceToNext]);
 
-  // Block contact and advance
-  const handleBlock = useCallback(async () => {
+  // Block contact and advance instantly in 0ms
+  const handleBlock = useCallback(() => {
     if (!currentContact || !currentRecipient || userRole === 'VIEWER') return;
     if (window.confirm(`Globally block and suppress ${currentContact.displayName}? This stops all future outreach across all channels.`)) {
-      setLoadingAction(true);
-      try {
-        await onToggleBlock(currentContact.id, 'Suppressed during campaign review');
-        await onSkip(currentRecipient.id, 'Contact globally suppressed');
-        advanceToNext();
-      } catch (err) {
-        console.error(err);
-      } finally {
-        setLoadingAction(false);
-      }
+      const contactId = currentContact.id;
+      const recipientId = currentRecipient.id;
+      // Advance queue immediately so operator never waits
+      advanceToNext();
+      // Fire suppression updates concurrently in background
+      Promise.all([
+        onToggleBlock(contactId, 'Suppressed during campaign review'),
+        onSkip(recipientId, 'Contact globally suppressed')
+      ]).catch((err: any) => {
+        console.error('Background block & suppression error:', err);
+      });
     }
   }, [currentContact, currentRecipient, userRole, onToggleBlock, onSkip, advanceToNext]);
 
@@ -443,7 +450,7 @@ export const ManualSendingWorkspace: React.FC<ManualSendingWorkspaceProps> = ({
             {/* 2. Mark Sent: Verified by operator */}
             <button
               onClick={handleMarkSent}
-              disabled={loadingAction || userRole === 'VIEWER'}
+              disabled={userRole === 'VIEWER'}
               className={`py-3 px-4 rounded-xl font-bold text-xs sm:text-sm flex items-center justify-center gap-2 shadow-sm transition disabled:opacity-50 cursor-pointer select-none active:scale-[0.98] ${
                 isOpened
                   ? 'bg-emerald-600 hover:bg-emerald-700 text-white ring-2 ring-emerald-400 shadow-emerald-600/30 shadow-lg'
@@ -482,7 +489,7 @@ export const ManualSendingWorkspace: React.FC<ManualSendingWorkspaceProps> = ({
             <div className="flex items-center gap-1.5">
               <button
                 onClick={handleSkip}
-                disabled={loadingAction || userRole === 'VIEWER'}
+                disabled={userRole === 'VIEWER'}
                 className="px-3 py-2 rounded-lg border border-neutral-200 dark:border-neutral-700 text-neutral-600 dark:text-neutral-300 text-xs font-medium hover:bg-neutral-100 dark:hover:bg-neutral-800 transition cursor-pointer"
                 title="Skip (K)"
               >
@@ -491,7 +498,7 @@ export const ManualSendingWorkspace: React.FC<ManualSendingWorkspaceProps> = ({
 
               <button
                 onClick={handleBlock}
-                disabled={loadingAction || userRole === 'VIEWER'}
+                disabled={userRole === 'VIEWER'}
                 className="px-3 py-2 rounded-lg border border-rose-200 dark:border-rose-900/60 text-rose-600 dark:text-rose-400 text-xs font-medium hover:bg-rose-50 dark:hover:bg-rose-950/30 transition cursor-pointer"
                 title="Block / Do Not Contact (B)"
               >

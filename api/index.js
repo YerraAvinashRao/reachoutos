@@ -399,24 +399,30 @@ var SupabaseDatabaseAdapter = class {
         const { data, error } = await client.from("campaign_recipients").update(dbUpdates).eq("id", recipientId).select().single();
         if (error) throw error;
         const campaignId = data.campaign_id;
-        const [
-          { count: sentCount },
-          { count: openedCount },
-          { count: skippedCount },
-          { count: blockedCount }
-        ] = await Promise.all([
-          client.from("campaign_recipients").select("*", { count: "exact", head: true }).eq("campaign_id", campaignId).eq("status", "USER_SENT"),
-          client.from("campaign_recipients").select("*", { count: "exact", head: true }).eq("campaign_id", campaignId).in("status", ["OPENED", "USER_SENT"]),
-          client.from("campaign_recipients").select("*", { count: "exact", head: true }).eq("campaign_id", campaignId).eq("status", "SKIPPED"),
-          client.from("campaign_recipients").select("*", { count: "exact", head: true }).eq("campaign_id", campaignId).in("status", ["BLOCKED", "OPTED_OUT"])
-        ]);
-        await client.from("campaigns").update({
-          sent_count: sentCount || 0,
-          opened_count: openedCount || 0,
-          skipped_count: skippedCount || 0,
-          blocked_count: blockedCount || 0,
-          updated_at: (/* @__PURE__ */ new Date()).toISOString()
-        }).eq("id", campaignId);
+        (async () => {
+          try {
+            const [
+              { count: sentCount },
+              { count: openedCount },
+              { count: skippedCount },
+              { count: blockedCount }
+            ] = await Promise.all([
+              client.from("campaign_recipients").select("*", { count: "exact", head: true }).eq("campaign_id", campaignId).eq("status", "USER_SENT"),
+              client.from("campaign_recipients").select("*", { count: "exact", head: true }).eq("campaign_id", campaignId).in("status", ["OPENED", "USER_SENT"]),
+              client.from("campaign_recipients").select("*", { count: "exact", head: true }).eq("campaign_id", campaignId).eq("status", "SKIPPED"),
+              client.from("campaign_recipients").select("*", { count: "exact", head: true }).eq("campaign_id", campaignId).in("status", ["BLOCKED", "OPTED_OUT"])
+            ]);
+            await client.from("campaigns").update({
+              sent_count: sentCount || 0,
+              opened_count: openedCount || 0,
+              skipped_count: skippedCount || 0,
+              blocked_count: blockedCount || 0,
+              updated_at: (/* @__PURE__ */ new Date()).toISOString()
+            }).eq("id", campaignId);
+          } catch (metricErr) {
+            console.warn("Background campaign metrics aggregation error:", metricErr);
+          }
+        })();
         return this.mapDbRecipientToDomain(data);
       },
       addRecipients: async (recipientsData, tenantId) => {
@@ -2107,13 +2113,13 @@ api.post(
 );
 api.post(
   "/contacts/:id/toggle-block",
-  requireRole(["OWNER", "ADMIN", "MANAGER"]),
+  requireRole(["OWNER", "ADMIN", "MANAGER", "OPERATOR"]),
   async (req, res) => {
     try {
       const contact = await db.contactsRepo.findById(req.params.id, req.auth.tenant.id);
       if (!contact) return res.status(404).json({ error: { message: "Contact not found" } });
       const isBlocked = !contact.isGloballyBlocked;
-      const reason = req.body.reason || (isBlocked ? "Manually suppressed by manager" : void 0);
+      const reason = req.body.reason || (isBlocked ? "Manually suppressed by operator" : void 0);
       const updated = await db.contactsRepo.update(
         contact.id,
         {
@@ -2123,16 +2129,22 @@ api.post(
         },
         req.auth.tenant.id
       );
-      await db.contactsRepo.addTimelineEvent({
-        contactId: contact.id,
-        tenantId: req.auth.tenant.id,
-        eventType: isBlocked ? "BLOCKED" : "CONTACT_UPDATED",
-        actor: req.auth.user.name,
-        actorId: req.auth.user.id,
-        actorName: req.auth.user.name,
-        description: isBlocked ? `Globally blocked: ${reason}` : "Global block removed"
-      });
-      await logAudit(isBlocked ? "CONTACT_BLOCKED" : "CONTACT_UNBLOCKED", "CONTACT", contact.id, { reason }, req);
+      (async () => {
+        try {
+          await db.contactsRepo.addTimelineEvent({
+            contactId: contact.id,
+            tenantId: req.auth.tenant.id,
+            eventType: isBlocked ? "BLOCKED" : "CONTACT_UPDATED",
+            actor: req.auth.user.name,
+            actorId: req.auth.user.id,
+            actorName: req.auth.user.name,
+            description: isBlocked ? `Globally blocked: ${reason}` : "Global block removed"
+          });
+          await logAudit(isBlocked ? "CONTACT_BLOCKED" : "CONTACT_UNBLOCKED", "CONTACT", contact.id, { reason }, req);
+        } catch (bgErr) {
+          console.warn("Background block audit log:", bgErr);
+        }
+      })();
       res.json({ data: updated });
     } catch (err) {
       handleDatabaseError(err, res);
@@ -2818,28 +2830,34 @@ api.post(
         status: "USER_SENT",
         userSentAt: now
       });
-      const contact = await db.contactsRepo.findById(recipient.contactId, req.auth.tenant.id);
-      if (contact) {
-        await db.contactsRepo.update(
-          contact.id,
-          {
-            lastInteractionAt: now,
-            lastMessageSentAt: now
-          },
-          req.auth.tenant.id
-        );
-        await db.contactsRepo.addTimelineEvent({
-          contactId: contact.id,
-          tenantId: req.auth.tenant.id,
-          eventType: "USER_MARKED_SENT",
-          actor: req.auth.user.name,
-          actorId: req.auth.user.id,
-          actorName: req.auth.user.name,
-          campaignName: campaign.name,
-          description: `Operator confirmed message sent via ${recipient.channel} to ${recipient.channelAddress}`
-        });
-      }
-      await logAudit("MESSAGE_MARKED_SENT", "CONTACT", recipient.contactId, { campaignId, channel: recipient.channel }, req);
+      (async () => {
+        try {
+          const contact = await db.contactsRepo.findById(recipient.contactId, req.auth.tenant.id);
+          if (contact) {
+            await db.contactsRepo.update(
+              contact.id,
+              {
+                lastInteractionAt: now,
+                lastMessageSentAt: now
+              },
+              req.auth.tenant.id
+            );
+            await db.contactsRepo.addTimelineEvent({
+              contactId: contact.id,
+              tenantId: req.auth.tenant.id,
+              eventType: "USER_MARKED_SENT",
+              actor: req.auth.user.name,
+              actorId: req.auth.user.id,
+              actorName: req.auth.user.name,
+              campaignName: campaign.name,
+              description: `Operator confirmed message sent via ${recipient.channel} to ${recipient.channelAddress}`
+            });
+          }
+          await logAudit("MESSAGE_MARKED_SENT", "CONTACT", recipient.contactId, { campaignId, channel: recipient.channel }, req);
+        } catch (bgErr) {
+          console.warn("Background mark-sent telemetry error:", bgErr);
+        }
+      })();
       res.json({ data: updatedRecipient });
     } catch (err) {
       handleDatabaseError(err, res);

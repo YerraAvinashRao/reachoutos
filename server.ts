@@ -437,14 +437,14 @@ api.post(
 
 api.post(
   '/contacts/:id/toggle-block',
-  requireRole(['OWNER', 'ADMIN', 'MANAGER']),
+  requireRole(['OWNER', 'ADMIN', 'MANAGER', 'OPERATOR']),
   async (req: AuthenticatedRequest, res: Response) => {
     try {
       const contact = await db.contactsRepo.findById(req.params.id, req.auth!.tenant.id);
       if (!contact) return res.status(404).json({ error: { message: 'Contact not found' } });
 
       const isBlocked = !contact.isGloballyBlocked;
-      const reason = req.body.reason || (isBlocked ? 'Manually suppressed by manager' : undefined);
+      const reason = req.body.reason || (isBlocked ? 'Manually suppressed by operator' : undefined);
 
       const updated = await db.contactsRepo.update(
         contact.id,
@@ -456,17 +456,25 @@ api.post(
         req.auth!.tenant.id
       );
 
-      await db.contactsRepo.addTimelineEvent({
-        contactId: contact.id,
-        tenantId: req.auth!.tenant.id,
-        eventType: isBlocked ? 'BLOCKED' : 'CONTACT_UPDATED',
-        actor: req.auth!.user.name,
-        actorId: req.auth!.user.id,
-        actorName: req.auth!.user.name,
-        description: isBlocked ? `Globally blocked: ${reason}` : 'Global block removed'
-      });
+      // Asynchronous background timeline & audit to keep operator response instant (<20ms)
+      (async () => {
+        try {
+          await db.contactsRepo.addTimelineEvent({
+            contactId: contact.id,
+            tenantId: req.auth!.tenant.id,
+            eventType: isBlocked ? 'BLOCKED' : 'CONTACT_UPDATED',
+            actor: req.auth!.user.name,
+            actorId: req.auth!.user.id,
+            actorName: req.auth!.user.name,
+            description: isBlocked ? `Globally blocked: ${reason}` : 'Global block removed'
+          });
 
-      await logAudit(isBlocked ? 'CONTACT_BLOCKED' : 'CONTACT_UNBLOCKED', 'CONTACT', contact.id, { reason }, req);
+          await logAudit(isBlocked ? 'CONTACT_BLOCKED' : 'CONTACT_UNBLOCKED', 'CONTACT', contact.id, { reason }, req);
+        } catch (bgErr) {
+          console.warn('Background block audit log:', bgErr);
+        }
+      })();
+
       res.json({ data: updated });
     } catch (err) {
       handleDatabaseError(err, res);
@@ -1305,29 +1313,36 @@ api.post(
         userSentAt: now
       });
 
-      const contact = await db.contactsRepo.findById(recipient.contactId, req.auth!.tenant.id);
-      if (contact) {
-        await db.contactsRepo.update(
-          contact.id,
-          {
-            lastInteractionAt: now,
-            lastMessageSentAt: now
-          },
-          req.auth!.tenant.id
-        );
-        await db.contactsRepo.addTimelineEvent({
-          contactId: contact.id,
-          tenantId: req.auth!.tenant.id,
-          eventType: 'USER_MARKED_SENT',
-          actor: req.auth!.user.name,
-          actorId: req.auth!.user.id,
-          actorName: req.auth!.user.name,
-          campaignName: campaign.name,
-          description: `Operator confirmed message sent via ${recipient.channel} to ${recipient.channelAddress}`
-        });
-      }
+      // Asynchronous background persistence for contact metrics, timeline, and audit
+      (async () => {
+        try {
+          const contact = await db.contactsRepo.findById(recipient.contactId, req.auth!.tenant.id);
+          if (contact) {
+            await db.contactsRepo.update(
+              contact.id,
+              {
+                lastInteractionAt: now,
+                lastMessageSentAt: now
+              },
+              req.auth!.tenant.id
+            );
+            await db.contactsRepo.addTimelineEvent({
+              contactId: contact.id,
+              tenantId: req.auth!.tenant.id,
+              eventType: 'USER_MARKED_SENT',
+              actor: req.auth!.user.name,
+              actorId: req.auth!.user.id,
+              actorName: req.auth!.user.name,
+              campaignName: campaign.name,
+              description: `Operator confirmed message sent via ${recipient.channel} to ${recipient.channelAddress}`
+            });
+          }
+          await logAudit('MESSAGE_MARKED_SENT', 'CONTACT', recipient.contactId, { campaignId, channel: recipient.channel }, req);
+        } catch (bgErr) {
+          console.warn('Background mark-sent telemetry error:', bgErr);
+        }
+      })();
 
-      await logAudit('MESSAGE_MARKED_SENT', 'CONTACT', recipient.contactId, { campaignId, channel: recipient.channel }, req);
       res.json({ data: updatedRecipient });
     } catch (err) {
       handleDatabaseError(err, res);

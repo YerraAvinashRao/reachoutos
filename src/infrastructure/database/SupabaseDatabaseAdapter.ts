@@ -575,27 +575,33 @@ export class SupabaseDatabaseAdapter {
 
       if (error) throw error;
 
-      // Recalculate campaign metrics in database in parallel
+      // Recalculate campaign metrics in database in background (non-blocking for instant response)
       const campaignId = data.campaign_id;
-      const [
-        { count: sentCount },
-        { count: openedCount },
-        { count: skippedCount },
-        { count: blockedCount }
-      ] = await Promise.all([
-        client.from('campaign_recipients').select('*', { count: 'exact', head: true }).eq('campaign_id', campaignId).eq('status', 'USER_SENT'),
-        client.from('campaign_recipients').select('*', { count: 'exact', head: true }).eq('campaign_id', campaignId).in('status', ['OPENED', 'USER_SENT']),
-        client.from('campaign_recipients').select('*', { count: 'exact', head: true }).eq('campaign_id', campaignId).eq('status', 'SKIPPED'),
-        client.from('campaign_recipients').select('*', { count: 'exact', head: true }).eq('campaign_id', campaignId).in('status', ['BLOCKED', 'OPTED_OUT'])
-      ]);
+      (async () => {
+        try {
+          const [
+            { count: sentCount },
+            { count: openedCount },
+            { count: skippedCount },
+            { count: blockedCount }
+          ] = await Promise.all([
+            client.from('campaign_recipients').select('*', { count: 'exact', head: true }).eq('campaign_id', campaignId).eq('status', 'USER_SENT'),
+            client.from('campaign_recipients').select('*', { count: 'exact', head: true }).eq('campaign_id', campaignId).in('status', ['OPENED', 'USER_SENT']),
+            client.from('campaign_recipients').select('*', { count: 'exact', head: true }).eq('campaign_id', campaignId).eq('status', 'SKIPPED'),
+            client.from('campaign_recipients').select('*', { count: 'exact', head: true }).eq('campaign_id', campaignId).in('status', ['BLOCKED', 'OPTED_OUT'])
+          ]);
 
-      await client.from('campaigns').update({
-        sent_count: sentCount || 0,
-        opened_count: openedCount || 0,
-        skipped_count: skippedCount || 0,
-        blocked_count: blockedCount || 0,
-        updated_at: new Date().toISOString()
-      }).eq('id', campaignId);
+          await client.from('campaigns').update({
+            sent_count: sentCount || 0,
+            opened_count: openedCount || 0,
+            skipped_count: skippedCount || 0,
+            blocked_count: blockedCount || 0,
+            updated_at: new Date().toISOString()
+          }).eq('id', campaignId);
+        } catch (metricErr) {
+          console.warn('Background campaign metrics aggregation error:', metricErr);
+        }
+      })();
 
       return this.mapDbRecipientToDomain(data);
     },
