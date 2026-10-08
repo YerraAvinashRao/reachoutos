@@ -1,8 +1,17 @@
 node_modules/
 build/
 dist/
+dist-server/
 coverage/
 .DS_Store
 *.log
 .env*
 !.env.example
+
+# Generated server bundle (created by npm run build → node scripts/build-server.mjs)
+# Vercel regenerates these during its build step, so they don't need to be in git.
+api/index.js
+api/server-bundle.mjs
+
+# Temp build files
+scripts/_vercel_entry.ts
