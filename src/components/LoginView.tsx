@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { supabase } from '../services/supabaseClient';
 import { Lock, Mail, KeyRound, ArrowRight, ShieldCheck, User, AlertCircle, CheckCircle2, Loader2, Sparkles } from 'lucide-react';
+import { ReachOut3DLoader } from './common/ReachOut3DLoader';
 
 interface LoginViewProps {
   onSuccess: () => void;
@@ -126,6 +127,19 @@ export const LoginView: React.FC<LoginViewProps> = ({ onSuccess }) => {
 
   return (
     <div className="min-h-screen bg-neutral-900 flex flex-col justify-center py-12 sm:px-6 lg:px-8 text-neutral-100">
+      {loading && (
+        <ReachOut3DLoader
+          variant="modal"
+          title="Authenticating Session"
+          subtitle={mode === 'SIGN_UP' ? 'Registering Workspace Account...' : 'Verifying Supabase Auth Credentials...'}
+          steps={[
+            "Validating Bearer Token Signature...",
+            "Checking PostgreSQL Tenant Permissions...",
+            "Decrypting User Preferences & State...",
+            "Preparing ReachOut OS Dashboard..."
+          ]}
+        />
+      )}
       <div className="sm:mx-auto sm:w-full sm:max-w-md text-center">
         <div className="inline-flex items-center justify-center w-12 h-12 rounded-xl bg-white text-neutral-950 font-bold text-xl shadow-lg mb-4">
           RO

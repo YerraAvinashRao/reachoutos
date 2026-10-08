@@ -2,13 +2,14 @@ import React, { useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Send, Plus, CheckCircle2, Clock, Play, Pause, AlertCircle, Eye, ArrowRight, Trash2, Loader2 } from 'lucide-react';
 import { Campaign, ContactList, MessageTemplate, Role, ChannelType } from '../types';
+import { ReachOut3DLoader } from './common/ReachOut3DLoader';
 
 interface CampaignsViewProps {
   campaigns: Campaign[];
   lists: ContactList[];
   templates: MessageTemplate[];
   onSelectCampaign: (id: string) => void;
-  onCreateCampaign: (data: any) => void;
+  onCreateCampaign: (data: any) => Promise<any> | void;
   onDeleteCampaign?: (id: string) => Promise<void>;
   userRole: Role;
 }
@@ -23,6 +24,7 @@ export const CampaignsView: React.FC<CampaignsViewProps> = ({
   userRole
 }) => {
   const [showCreateModal, setShowCreateModal] = useState(false);
+  const [isCreating, setIsCreating] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [formData, setFormData] = useState<{
     name: string;
@@ -40,10 +42,15 @@ export const CampaignsView: React.FC<CampaignsViewProps> = ({
     isDryRun: false
   });
 
-  const handleCreateSubmit = (e: React.FormEvent) => {
+  const handleCreateSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    onCreateCampaign(formData);
+    setIsCreating(true);
     setShowCreateModal(false);
+    try {
+      await onCreateCampaign(formData);
+    } finally {
+      setIsCreating(false);
+    }
   };
 
   return (
@@ -167,6 +174,21 @@ export const CampaignsView: React.FC<CampaignsViewProps> = ({
           );
         })}
       </div>
+
+      {/* 3D Realistic Animated Loader for Campaign Initialization */}
+      {isCreating && (
+        <ReachOut3DLoader
+          variant="modal"
+          title="Initializing Campaign"
+          subtitle={`Compiling Audience & Message Queue for ${formData.name || 'New Campaign'}`}
+          steps={[
+            "Resolving Dynamic Liquid Tags & Personalization...",
+            "Validating WhatsApp E.164 Phone Normalization...",
+            "Enforcing Opt-Out & Regulatory Guardrails...",
+            "Registering Governed Campaign in PostgreSQL..."
+          ]}
+        />
+      )}
 
       {/* Modal: Create Campaign */}
       {showCreateModal && createPortal(

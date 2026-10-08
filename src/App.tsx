@@ -22,6 +22,7 @@ import { apiClient } from './services/apiClient';
 import { supabase } from './services/supabaseClient';
 import { Tenant, User, Contact, Campaign, MessageTemplate, ContactList, AuditLogEntry, TimelineEvent } from './types';
 import { Database, ShieldAlert, ExternalLink, Terminal, CheckCircle2, AlertCircle, RefreshCw } from 'lucide-react';
+import { ReachOut3DLoader } from './components/common/ReachOut3DLoader';
 
 export default function App() {
   const [darkMode, setDarkMode] = useState(true);
@@ -392,6 +393,21 @@ export default function App() {
               Retry Now
             </button>
           </div>
+        )}
+
+        {/* Fullscreen 3D Realistic Animated Loader on initial uncached authentication sync */}
+        {authLoading && !cachedWorkspace && isAuthenticated && (
+          <ReachOut3DLoader
+            variant="fullscreen"
+            title="ReachOut OS"
+            subtitle="Synchronizing Governed Outreach Ledger"
+            steps={[
+              "Connecting to Supabase PostgreSQL Database...",
+              "Verifying Encrypted Tenant Auth Session...",
+              "Calibrating Omni-Channel Audience Ledger...",
+              "Rendering Autonomous ReachOut Canvas..."
+            ]}
+          />
         )}
 
         {/* 1. Supabase Database Unconfigured Gate (Rule 12 & Rule 23: Fail Safely, Zero Fake Fallback) */}
