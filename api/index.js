@@ -305,7 +305,7 @@ var SupabaseDatabaseAdapter = class {
           is_dry_run: campaignData.isDryRun ?? false,
           assigned_operator: campaignData.assignedOperator || createdBy,
           created_by: createdBy,
-          recipients_count: 0,
+          recipients_count: campaignData.recipientsCount ?? 0,
           sent_count: 0,
           opened_count: 0,
           skipped_count: 0,
@@ -2558,14 +2558,16 @@ api.post(
   async (req, res) => {
     try {
       const { name, description, channel, targetListId, templateId, isDryRun } = req.body;
-      const template = await db.templatesRepo.findById(templateId, req.auth.tenant.id);
+      const tenantId = req.auth.tenant.id;
+      const [template, targetList, targetContacts] = await Promise.all([
+        db.templatesRepo.findById(templateId, tenantId),
+        db.contactListsRepo.findById(targetListId, tenantId),
+        db.contactsRepo.findAll(tenantId, void 0, void 0, targetListId)
+      ]);
       if (!template) return res.status(400).json({ error: { message: "Template not found" } });
-      const targetList = await db.contactListsRepo.findById(targetListId, req.auth.tenant.id);
       if (!targetList) return res.status(400).json({ error: { message: "Target list not found" } });
-      const allContacts = await db.contactsRepo.findAll(req.auth.tenant.id);
-      const targetContacts = allContacts.filter((c) => targetList.contactIds.includes(c.id));
       const campaign = await db.campaignsRepo.create({
-        tenantId: req.auth.tenant.id,
+        tenantId,
         name,
         description: description || "",
         channel: channel || template.channel,
@@ -2582,7 +2584,8 @@ api.post(
         },
         isDryRun: !!isDryRun,
         createdBy: req.auth.user.id,
-        assignedOperator: req.auth.user.id
+        assignedOperator: req.auth.user.id,
+        recipientsCount: targetContacts.length
       });
       const recipientEntries = [];
       for (const c of targetContacts) {
@@ -2601,7 +2604,7 @@ api.post(
         const { resolved } = DataQualityEngine.resolveTemplateVariables(template.body, contactData);
         const resolvedSub = template.subject ? DataQualityEngine.resolveTemplateVariables(template.subject, contactData).resolved : void 0;
         recipientEntries.push({
-          tenantId: req.auth.tenant.id,
+          tenantId,
           campaignId: campaign.id,
           contactId: c.id,
           contactName: c.displayName,
@@ -2614,14 +2617,11 @@ api.post(
           status: "READY"
         });
       }
-      await db.campaignsRepo.addRecipients(recipientEntries, req.auth.tenant.id);
-      const updatedCampaign = await db.campaignsRepo.update(
-        campaign.id,
-        { recipientsCount: recipientEntries.length },
-        req.auth.tenant.id
-      );
-      await logAudit("CAMPAIGN_CREATED", "CAMPAIGN", campaign.id, { name, recipients: recipientEntries.length }, req);
-      res.json({ data: updatedCampaign });
+      await Promise.all([
+        db.campaignsRepo.addRecipients(recipientEntries, tenantId),
+        logAudit("CAMPAIGN_CREATED", "CAMPAIGN", campaign.id, { name, recipients: recipientEntries.length }, req)
+      ]);
+      res.json({ data: campaign });
     } catch (err) {
       handleDatabaseError(err, res);
     }

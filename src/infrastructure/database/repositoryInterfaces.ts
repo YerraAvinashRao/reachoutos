@@ -25,7 +25,7 @@ export interface IContactRepository {
 export interface ICampaignRepository {
   findAll(tenantId: string): Promise<Campaign[]>;
   findById(id: string, tenantId?: string): Promise<Campaign | null>;
-  create(campaign: Omit<Campaign, 'id' | 'createdAt' | 'recipientsCount' | 'sentCount' | 'openedCount' | 'skippedCount' | 'blockedCount'>): Promise<Campaign>;
+  create(campaign: Omit<Campaign, 'id' | 'createdAt' | 'recipientsCount' | 'sentCount' | 'openedCount' | 'skippedCount' | 'blockedCount'> & { recipientsCount?: number }): Promise<Campaign>;
   update(id: string, updates: Partial<Campaign>, tenantId?: string): Promise<Campaign>;
   updateStatus?(id: string, tenantId: string, status: any): Promise<Campaign>;
   getRecipients(campaignId: string): Promise<CampaignRecipient[]>;

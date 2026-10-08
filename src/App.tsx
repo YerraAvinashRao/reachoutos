@@ -332,11 +332,35 @@ export default function App() {
 
   useEffect(() => {
     if (selectedCampaignId) {
-      apiClient.getCampaign(selectedCampaignId).then(res => {
-        if (res?.recipients) setCampaignRecipients(res.recipients);
-      });
+      if (selectedCampaignId.startsWith('temp-')) {
+        // Optimistic campaign: construct recipients instantly from list members
+        const camp = campaigns.find(c => c.id === selectedCampaignId);
+        if (camp) {
+          const list = lists.find(l => l.id === camp.targetListId);
+          const targetContacts = contacts.filter(c => list?.contactIds.includes(c.id));
+          const optRecipients = targetContacts.map(c => ({
+            id: `opt-rec-${c.id}`,
+            campaignId: camp.id,
+            contactId: c.id,
+            contactName: c.displayName,
+            companyName: c.companyName,
+            channel: camp.channel,
+            channelAddress: camp.channel === 'WHATSAPP' ? c.phone : c.email,
+            resolvedMessage: camp.templateSnapshot.body,
+            status: 'READY' as const,
+            createdAt: new Date().toISOString()
+          }));
+          setCampaignRecipients(optRecipients);
+        }
+      } else {
+        apiClient.getCampaign(selectedCampaignId).then(res => {
+          if (res?.recipients) setCampaignRecipients(res.recipients);
+        });
+      }
+    } else {
+      setCampaignRecipients([]);
     }
-  }, [selectedCampaignId]);
+  }, [selectedCampaignId, campaigns, lists, contacts]);
 
   return (
     <div className={darkMode ? 'dark font-sans' : 'font-sans'}>
@@ -766,12 +790,63 @@ export default function App() {
                   userRole={user?.role || 'VIEWER'}
                   onSelectCampaign={(id: string) => setSelectedCampaignId(id)}
                   onCreateCampaign={async (data) => {
-                    const res = await apiClient.createCampaign(data);
-                    if (res?.data) {
-                      setCampaigns(prev => [res.data, ...prev]);
-                      setSelectedCampaignId(res.data.id);
-                    } else {
-                      loadData();
+                    const targetList = lists.find(l => l.id === data.targetListId);
+                    const template = templates.find(t => t.id === data.templateId);
+                    const tempId = `temp-${Date.now()}`;
+                    const optimisticCampaign: Campaign = {
+                      id: tempId,
+                      tenantId: tenant?.id || '',
+                      name: data.name,
+                      description: data.description || '',
+                      channel: data.channel || template?.channel || 'WHATSAPP',
+                      status: 'DRAFT',
+                      targetListId: data.targetListId,
+                      targetListName: targetList?.name || 'Target Audience',
+                      templateId: data.templateId,
+                      templateVersion: template?.version || 1,
+                      templateSnapshot: {
+                        name: template?.name || '',
+                        subject: template?.subject,
+                        body: template?.body || '',
+                        attachmentName: template?.attachmentName
+                      },
+                      isDryRun: !!data.isDryRun,
+                      assignedOperator: user?.id || '',
+                      createdBy: user?.id || '',
+                      recipientsCount: targetList?.contactIds?.length || 0,
+                      sentCount: 0,
+                      openedCount: 0,
+                      skippedCount: 0,
+                      blockedCount: 0,
+                      createdAt: new Date().toISOString()
+                    };
+
+                    // 1. Instant optimistic UI update (0ms delay)
+                    setCampaigns(prev => [optimisticCampaign, ...prev]);
+                    setSelectedCampaignId(tempId);
+
+                    try {
+                      // 2. Perform backend campaign creation
+                      const created = await apiClient.createCampaign(data);
+                      if (created?.id) {
+                        setCampaigns(prev => prev.map(c => c.id === tempId ? created : c));
+                        setSelectedCampaignId(created.id);
+
+                        // 3. Update local cache
+                        try {
+                          const raw = localStorage.getItem('reachout_workspace_cache');
+                          if (raw) {
+                            const cache = JSON.parse(raw);
+                            cache.campaigns = [created, ...(cache.campaigns || []).filter((c: any) => c.id !== tempId)];
+                            localStorage.setItem('reachout_workspace_cache', JSON.stringify(cache));
+                          }
+                        } catch (_) {}
+                      }
+                    } catch (err) {
+                      // Revert optimistic addition on failure
+                      setCampaigns(prev => prev.filter(c => c.id !== tempId));
+                      setSelectedCampaignId(null);
+                      console.error('Failed to create campaign:', err);
                     }
                   }}
                   onDeleteCampaign={async (id: string) => {

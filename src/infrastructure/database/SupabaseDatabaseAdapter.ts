@@ -444,7 +444,7 @@ export class SupabaseDatabaseAdapter {
         is_dry_run: campaignData.isDryRun ?? false,
         assigned_operator: campaignData.assignedOperator || createdBy,
         created_by: createdBy,
-        recipients_count: 0,
+        recipients_count: campaignData.recipientsCount ?? 0,
         sent_count: 0,
         opened_count: 0,
         skipped_count: 0,

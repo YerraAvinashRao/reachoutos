@@ -1002,17 +1002,21 @@ api.post(
     try {
       const { name, description, channel, targetListId, templateId, isDryRun } = req.body;
 
-      const template = await db.templatesRepo.findById(templateId, req.auth!.tenant.id);
-      if (!template) return res.status(400).json({ error: { message: 'Template not found' } });
+      const tenantId = req.auth!.tenant.id;
 
-      const targetList = await db.contactListsRepo.findById(targetListId, req.auth!.tenant.id);
+      // 1. Concurrently fetch template, target list, and ONLY the target list contacts (SQL junction filtered)
+      const [template, targetList, targetContacts] = await Promise.all([
+        db.templatesRepo.findById(templateId, tenantId),
+        db.contactListsRepo.findById(targetListId, tenantId),
+        db.contactsRepo.findAll(tenantId, undefined, undefined, targetListId)
+      ]);
+
+      if (!template) return res.status(400).json({ error: { message: 'Template not found' } });
       if (!targetList) return res.status(400).json({ error: { message: 'Target list not found' } });
 
-      const allContacts = await db.contactsRepo.findAll(req.auth!.tenant.id);
-      const targetContacts = allContacts.filter(c => targetList.contactIds.includes(c.id));
-
+      // 2. Create campaign with pre-calculated recipientsCount in one single write
       const campaign = await db.campaignsRepo.create({
-        tenantId: req.auth!.tenant.id,
+        tenantId,
         name,
         description: description || '',
         channel: channel || template.channel,
@@ -1029,9 +1033,11 @@ api.post(
         },
         isDryRun: !!isDryRun,
         createdBy: req.auth!.user.id,
-        assignedOperator: req.auth!.user.id
+        assignedOperator: req.auth!.user.id,
+        recipientsCount: targetContacts.length
       });
 
+      // 3. Resolve template variables for recipients
       const recipientEntries: Array<Omit<CampaignRecipient, 'id' | 'createdAt'>> = [];
       for (const c of targetContacts) {
         const contactData: Record<string, string> = {
@@ -1051,7 +1057,7 @@ api.post(
         const resolvedSub = template.subject ? DataQualityEngine.resolveTemplateVariables(template.subject, contactData).resolved : undefined;
 
         recipientEntries.push({
-          tenantId: req.auth!.tenant.id,
+          tenantId,
           campaignId: campaign.id,
           contactId: c.id,
           contactName: c.displayName,
@@ -1065,15 +1071,13 @@ api.post(
         });
       }
 
-      await db.campaignsRepo.addRecipients(recipientEntries, req.auth!.tenant.id);
-      const updatedCampaign = await db.campaignsRepo.update(
-        campaign.id,
-        { recipientsCount: recipientEntries.length },
-        req.auth!.tenant.id
-      );
+      // 4. Batch insert recipients and log audit concurrently
+      await Promise.all([
+        db.campaignsRepo.addRecipients(recipientEntries, tenantId),
+        logAudit('CAMPAIGN_CREATED', 'CAMPAIGN', campaign.id, { name, recipients: recipientEntries.length }, req)
+      ]);
 
-      await logAudit('CAMPAIGN_CREATED', 'CAMPAIGN', campaign.id, { name, recipients: recipientEntries.length }, req);
-      res.json({ data: updatedCampaign });
+      res.json({ data: campaign });
     } catch (err) {
       handleDatabaseError(err, res);
     }
