@@ -157,13 +157,13 @@ api.get('/tenant', async (req: AuthenticatedRequest, res: Response) => {
 api.get('/workspace/bootstrap', async (req: AuthenticatedRequest, res: Response) => {
   try {
     const tenantId = req.auth!.tenant.id;
-    const [tenant, contacts, campaigns, templates, lists, auditLogs] = await Promise.all([
-      db.tenantRepo.getTenant(tenantId),
+    const tenant = req.auth!.tenant;
+    const [contacts, campaigns, templates, lists, auditLogs] = await Promise.all([
       db.contactsRepo.findAll(tenantId),
       db.campaignsRepo.findAll(tenantId),
       db.templatesRepo.findAll(tenantId),
       db.contactListsRepo.findAll(tenantId),
-      db.auditRepo.findAll(tenantId, 100)
+      db.auditRepo.findAll(tenantId, 50)
     ]);
 
     let totalRecipients = 0;

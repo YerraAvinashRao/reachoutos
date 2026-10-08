@@ -21,6 +21,7 @@ var DatabaseUnconfiguredError = class extends Error {
 var SupabaseDatabaseAdapter = class {
   constructor(config) {
     this.client = null;
+    this.authCache = /* @__PURE__ */ new Map();
     // ============================================================================
     // CONTACTS REPOSITORY (PostgreSQL backed, strict tenant scoping)
     // ============================================================================
@@ -836,6 +837,11 @@ var SupabaseDatabaseAdapter = class {
   // AUTHENTICATION & MEMBERSHIP RESOLUTION
   // ============================================================================
   async validateAuthToken(token) {
+    const now = Date.now();
+    const cached = this.authCache.get(token);
+    if (cached && cached.expiresAt > now) {
+      return cached.result;
+    }
     const client = this.getClient();
     const { data: authData, error: authError } = await client.auth.getUser(token);
     if (authError || !authData.user) {
@@ -844,10 +850,14 @@ var SupabaseDatabaseAdapter = class {
     const authUser = authData.user;
     const userId = authUser.id;
     const email = authUser.email || "";
-    const { data: userProfile } = await client.from("users").select("*").eq("id", userId).maybeSingle();
+    const [userProfileRes, memberRowsRes] = await Promise.all([
+      client.from("users").select("*").eq("id", userId).maybeSingle(),
+      client.from("tenant_members").select("id, tenant_id, role, created_at, tenants(*)").eq("user_id", userId)
+    ]);
+    const userProfile = userProfileRes.data;
+    const { data: memberRows, error: memberErr } = memberRowsRes;
     const name = userProfile?.name || authUser.user_metadata?.full_name || email.split("@")[0];
     const avatarUrl = userProfile?.avatar_url || authUser.user_metadata?.avatar_url;
-    const { data: memberRows, error: memberErr } = await client.from("tenant_members").select("id, tenant_id, role, created_at, tenants(*)").eq("user_id", userId);
     if (memberErr || !memberRows || memberRows.length === 0) {
       try {
         const cleanSlug = (email.split("@")[0] || "workspace").toLowerCase().replace(/[^a-z0-9]/g, "-").slice(0, 30);
@@ -898,7 +908,7 @@ var SupabaseDatabaseAdapter = class {
       createdAt: row.created_at,
       tenant: this.mapDbTenantToDomain(row.tenants)
     }));
-    return {
+    const result = {
       user: {
         id: userId,
         email,
@@ -908,6 +918,13 @@ var SupabaseDatabaseAdapter = class {
       },
       memberships
     };
+    this.authCache.set(token, { result, expiresAt: now + 60 * 1e3 });
+    if (this.authCache.size > 200) {
+      for (const [k, v] of this.authCache.entries()) {
+        if (v.expiresAt <= now) this.authCache.delete(k);
+      }
+    }
+    return result;
   }
   // Helper Mappers between PostgreSQL snake_case and Domain camelCase
   mapDbContactToDomain(row) {
@@ -1847,13 +1864,13 @@ api.get("/tenant", async (req, res) => {
 api.get("/workspace/bootstrap", async (req, res) => {
   try {
     const tenantId = req.auth.tenant.id;
-    const [tenant, contacts, campaigns, templates, lists, auditLogs] = await Promise.all([
-      db.tenantRepo.getTenant(tenantId),
+    const tenant = req.auth.tenant;
+    const [contacts, campaigns, templates, lists, auditLogs] = await Promise.all([
       db.contactsRepo.findAll(tenantId),
       db.campaignsRepo.findAll(tenantId),
       db.templatesRepo.findAll(tenantId),
       db.contactListsRepo.findAll(tenantId),
-      db.auditRepo.findAll(tenantId, 100)
+      db.auditRepo.findAll(tenantId, 50)
     ]);
     let totalRecipients = 0;
     let totalOpened = 0;

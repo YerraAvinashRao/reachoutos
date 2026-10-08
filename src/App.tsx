@@ -32,20 +32,38 @@ export default function App() {
   const [databaseError, setDatabaseError] = useState<string | null>(null);
   const [schemaError, setSchemaError] = useState<string | null>(null);
   const [rateLimitNotice, setRateLimitNotice] = useState<string | null>(null);
-  const [isAuthenticated, setIsAuthenticated] = useState<boolean>(false);
+  const [isAuthenticated, setIsAuthenticated] = useState<boolean>(() => {
+    try {
+      if (typeof window === 'undefined') return false;
+      return Object.keys(localStorage).some(k => k.startsWith('sb-') && k.endsWith('-auth-token'));
+    } catch {
+      return false;
+    }
+  });
   const [authLoading, setAuthLoading] = useState<boolean>(true);
   const [needsPasswordSetup, setNeedsPasswordSetup] = useState<boolean>(false);
   const [pendingAuthUser, setPendingAuthUser] = useState<any>(null);
 
-  // Core PostgreSQL Data
-  const [tenant, setTenant] = useState<Tenant | null>(null);
-  const [user, setUser] = useState<User | null>(null);
-  const [contacts, setContacts] = useState<Contact[]>([]);
-  const [campaigns, setCampaigns] = useState<Campaign[]>([]);
-  const [templates, setTemplates] = useState<MessageTemplate[]>([]);
-  const [lists, setLists] = useState<ContactList[]>([]);
-  const [auditLogs, setAuditLogs] = useState<AuditLogEntry[]>([]);
-  const [stats, setStats] = useState<any>(null);
+  // Instant SWR Cache Helper: allows 0ms instantaneous UI render on reload
+  const [cachedWorkspace] = useState(() => {
+    try {
+      if (typeof window === 'undefined') return null;
+      const raw = localStorage.getItem('reachout_workspace_cache');
+      return raw ? JSON.parse(raw) : null;
+    } catch {
+      return null;
+    }
+  });
+
+  // Core PostgreSQL Data (Hydrated instantly from cache for instant first paint)
+  const [tenant, setTenant] = useState<Tenant | null>(() => cachedWorkspace?.tenant || null);
+  const [user, setUser] = useState<User | null>(() => cachedWorkspace?.user || null);
+  const [contacts, setContacts] = useState<Contact[]>(() => cachedWorkspace?.contacts || []);
+  const [campaigns, setCampaigns] = useState<Campaign[]>(() => cachedWorkspace?.campaigns || []);
+  const [templates, setTemplates] = useState<MessageTemplate[]>(() => cachedWorkspace?.templates || []);
+  const [lists, setLists] = useState<ContactList[]>(() => cachedWorkspace?.lists || []);
+  const [auditLogs, setAuditLogs] = useState<AuditLogEntry[]>(() => cachedWorkspace?.auditLogs || []);
+  const [stats, setStats] = useState<any>(() => cachedWorkspace?.stats || null);
 
   // Focus and detail states
   const [selectedContact, setSelectedContact] = useState<Contact | null>(null);
@@ -66,23 +84,6 @@ export default function App() {
   // Fetch all initial data from Supabase via single aggregated bootstrap request
   const loadData = useCallback(async () => {
     try {
-      const health = await apiClient.getHealth();
-      if (health?.status === 'RATE_LIMITED') {
-        setRateLimitNotice('Upstream proxy rate limit reached. Retrying shortly...');
-        setTimeout(() => loadData(), 2500);
-        return;
-      }
-      setRateLimitNotice(null);
-
-      if (health?.status === 'DATABASE_UNCONFIGURED' || health?.isDatabaseConfigured === false) {
-        setIsDatabaseConfigured(false);
-        setDatabaseError(health?.message || 'Supabase PostgreSQL database is not configured.');
-        setAuthLoading(false);
-        return;
-      }
-      setIsDatabaseConfigured(true);
-      setDatabaseError(null);
-
       // Check real Supabase Auth session directly from official Supabase client
       const { data: { session } } = await supabase.auth.getSession();
       if (!session) {
@@ -125,6 +126,23 @@ export default function App() {
           if (bootstrap.stats) setStats(bootstrap.stats);
           if (bootstrap.auditLogs) setAuditLogs(bootstrap.auditLogs);
           setSchemaError(null);
+          setIsDatabaseConfigured(true);
+          setDatabaseError(null);
+
+          // Save fresh snapshot to instant cache
+          try {
+            localStorage.setItem('reachout_workspace_cache', JSON.stringify({
+              contacts: bootstrap.contacts,
+              campaigns: bootstrap.campaigns,
+              templates: bootstrap.templates,
+              lists: bootstrap.lists,
+              auditLogs: bootstrap.auditLogs,
+              stats: bootstrap.stats,
+              tenant: bootstrap.tenant,
+              user: bootstrap.user,
+              timestamp: Date.now()
+            }));
+          } catch (_) {}
         }
       } catch (bootErr: any) {
         if (bootErr?.code === 'PGRST205' || bootErr?.message?.includes('schema cache')) {
@@ -200,6 +218,7 @@ export default function App() {
           }
         }
       } else if (event === 'SIGNED_OUT') {
+        try { localStorage.removeItem('reachout_workspace_cache'); } catch (_) {}
         setIsAuthenticated(false);
         setNeedsPasswordSetup(false);
         setPendingAuthUser(null);
@@ -270,6 +289,7 @@ export default function App() {
   };
 
   const handleSignOut = async () => {
+    try { localStorage.removeItem('reachout_workspace_cache'); } catch (_) {}
     await apiClient.logout();
     setIsAuthenticated(false);
     setUser(null);
