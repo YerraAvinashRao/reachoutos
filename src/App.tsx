@@ -46,75 +46,70 @@ export default function App() {
     }
   });
 
-  // Public Landing Page view state:
-  // - If visitor opens reachoutos.com (or root localhost), marketing landing page opens.
-  // - If visitor opens app.reachoutos.com, {tenant}.reachoutos.com, ?subdomain=app, or #app, it loads workspace directly!
+  // Strict Domain Fencing:
+  // - app.reachoutos.com: STRICTLY Outreach Operations & Workspace (Marketing Landing Page is completely disabled).
+  // - reachoutos.com: STRICTLY Public Marketing Landing Page (Operations cannot be run on main domain; redirected to app.reachoutos.com).
   const [showLandingPage, setShowLandingPage] = useState<boolean>(() => {
     try {
       if (typeof window === 'undefined') return true;
       const params = new URLSearchParams(window.location.search);
-      const hash = window.location.hash;
-      const pathname = window.location.pathname;
-
       const detected = SubdomainRouter.parseHost(window.location.hostname, params);
+      
+      // On app.reachoutos.com or tenant subdomain: always render workspace directly
       if (detected.mode === 'APP' || detected.mode === 'TENANT') {
         return false;
       }
-
-      if (hash === '#app' || params.get('app') === 'true' || params.get('view') === 'app' || pathname === '/app') {
-        return false;
-      }
-      return true; // Default to opening landing page on root entry
+      
+      // On main marketing domain: strictly render landing page
+      return true;
     } catch {
       return true;
     }
   });
 
-  // Sync Landing Page toggle with browser URL navigation, hash changes, and subdomain queries
+  // Strict Domain Routing Enforcement
   useEffect(() => {
-    const handleUrlChange = () => {
+    const handleDomainFencing = () => {
       const params = new URLSearchParams(window.location.search);
       const hash = window.location.hash;
       const pathname = window.location.pathname;
       const detected = SubdomainRouter.parseHost(window.location.hostname, params);
       setHostInfo(detected);
 
-      if (detected.mode === 'APP' || detected.mode === 'TENANT') {
-        setShowLandingPage(false);
-      } else if (hash === '#app' || params.get('app') === 'true' || params.get('view') === 'app' || pathname === '/app') {
-        setShowLandingPage(false);
-      } else if (hash === '#landing' || params.get('landing') === 'true' || (!hash && pathname === '/')) {
+      // 1. If visitor is on the Main Marketing Domain (reachoutos.com):
+      if (detected.mode === 'LANDING') {
         setShowLandingPage(true);
+        // If visitor attempts to open app operations directly on reachoutos.com, strictly redirect to app.reachoutos.com
+        if (hash === '#app' || params.get('app') === 'true' || pathname === '/app') {
+          const appUrl = SubdomainRouter.buildUrl('APP');
+          window.location.href = appUrl;
+        }
+      } 
+      // 2. If visitor is on App Operations Domain (app.reachoutos.com):
+      else if (detected.mode === 'APP' || detected.mode === 'TENANT') {
+        setShowLandingPage(false);
+        // If someone on app.reachoutos.com tries to navigate back to landing, redirect to reachoutos.com
+        if (hash === '#landing') {
+          const landingUrl = SubdomainRouter.buildUrl('LANDING');
+          window.location.href = landingUrl;
+        }
       }
     };
 
-    window.addEventListener('popstate', handleUrlChange);
-    window.addEventListener('hashchange', handleUrlChange);
+    handleDomainFencing();
+    window.addEventListener('popstate', handleDomainFencing);
+    window.addEventListener('hashchange', handleDomainFencing);
     return () => {
-      window.removeEventListener('popstate', handleUrlChange);
-      window.removeEventListener('hashchange', handleUrlChange);
+      window.removeEventListener('popstate', handleDomainFencing);
+      window.removeEventListener('hashchange', handleDomainFencing);
     };
   }, []);
 
   const handleSwitchSubdomainMode = (mode: SubdomainType, tenantSlug?: string) => {
     const url = SubdomainRouter.buildUrl(mode, { tenantSlug });
     if (typeof window !== 'undefined') {
-      const isLocal = window.location.hostname.includes('localhost') || window.location.hostname.includes('127.0.0.1');
-      if (isLocal) {
-        window.history.pushState(null, '', url);
-        const nextInfo = SubdomainRouter.parseHost(window.location.hostname, new URLSearchParams(window.location.search));
-        setHostInfo(nextInfo);
-        if (mode === 'LANDING') {
-          setShowLandingPage(true);
-        } else {
-          setShowLandingPage(false);
-          if (!isAuthenticated) {
-            loadData();
-          }
-        }
-      } else {
-        window.location.href = url;
-      }
+      // In production or local dev, navigate directly to enforce strict domain boundaries
+      window.location.href = url;
     }
   };
 

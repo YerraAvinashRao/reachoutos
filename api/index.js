@@ -4588,6 +4588,10 @@ app.use((req, res, next) => {
   if (hostInfo.mode === "API" && !req.path.startsWith("/api") && !req.path.startsWith("/v1") && !req.path.startsWith("/health")) {
     req.url = `/api/v1${req.url}`;
   }
+  if (hostInfo.mode === "LANDING" && (req.path === "/app" || req.path.startsWith("/app/"))) {
+    const targetUrl = SubdomainRouter.buildUrl("APP", { path: req.path.replace(/^\/app/, "") || "/" });
+    return res.redirect(302, targetUrl);
+  }
   next();
 });
 app.get(["/l/:slug", "/link/:slug"], async (req, res) => {

@@ -66,6 +66,13 @@ app.use((req: Request, res: Response, next: NextFunction) => {
     req.url = `/api/v1${req.url}`;
   }
 
+  // Strict Domain Fencing: If visitor requests /app on marketing domain (reachoutos.com),
+  // redirect them directly to app.reachoutos.com
+  if (hostInfo.mode === 'LANDING' && (req.path === '/app' || req.path.startsWith('/app/'))) {
+    const targetUrl = SubdomainRouter.buildUrl('APP', { path: req.path.replace(/^\/app/, '') || '/' });
+    return res.redirect(302, targetUrl);
+  }
+
   next();
 });
 

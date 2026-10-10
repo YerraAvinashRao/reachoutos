@@ -3,8 +3,8 @@
  * Interactive indicator and quick switcher across subdomains (app, landing, tenant, api).
  */
 
-import React from 'react';
-import { Globe, ExternalLink, ArrowRight, Server, ShieldCheck, Building } from 'lucide-react';
+import React, { useState } from 'react';
+import { Globe, ExternalLink, ArrowRight, Server, ShieldCheck, Building, X } from 'lucide-react';
 import { SubdomainRouter, SubdomainType } from '../../core/routing/SubdomainRouter';
 
 interface SubdomainSwitcherBarProps {
@@ -18,6 +18,16 @@ export const SubdomainSwitcherBar: React.FC<SubdomainSwitcherBarProps> = ({
   tenantSlug,
   onSwitchMode
 }) => {
+  const [dismissed, setDismissed] = useState<boolean>(() => {
+    try {
+      return sessionStorage.getItem('reachout_hide_subdomain_bar') === 'true';
+    } catch {
+      return false;
+    }
+  });
+
+  if (dismissed) return null;
+
   return (
     <div className="bg-neutral-900 text-neutral-300 border-b border-neutral-800 text-[11px] px-4 py-1.5 flex flex-wrap items-center justify-between gap-2 z-50">
       <div className="flex items-center gap-2">
@@ -81,6 +91,20 @@ export const SubdomainSwitcherBar: React.FC<SubdomainSwitcherBarProps> = ({
         >
           <Building className="w-3 h-3 text-purple-300" />
           <span>yarhoney.reachoutos.com</span>
+        </button>
+
+        {/* Dismiss Button */}
+        <button
+          onClick={() => {
+            setDismissed(true);
+            try {
+              sessionStorage.setItem('reachout_hide_subdomain_bar', 'true');
+            } catch (_) {}
+          }}
+          className="ml-2 text-neutral-500 hover:text-white p-1 rounded hover:bg-neutral-800 transition cursor-pointer"
+          title="Hide subdomain indicator bar"
+        >
+          <X className="w-3.5 h-3.5" />
         </button>
       </div>
     </div>
