@@ -188,17 +188,17 @@ export const TemplatesView: React.FC<TemplatesViewProps> = ({
                 {(() => {
                   const analysis = EngagementHeatmapService.analyzeCopy(tpl.body);
                   const toneColors: Record<string, string> = {
-                    FORMAL: 'bg-blue-50 text-blue-700 dark:bg-blue-950/40 dark:text-blue-300 border-blue-200 dark:border-blue-800',
-                    FRIENDLY: 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300 border-emerald-200 dark:border-emerald-800',
-                    URGENT: 'bg-amber-50 text-amber-700 dark:bg-amber-950/40 dark:text-amber-300 border-amber-200 dark:border-amber-800',
-                    PROMOTIONAL: 'bg-purple-50 text-purple-700 dark:bg-purple-950/40 dark:text-purple-300 border-purple-200 dark:border-purple-800',
-                    NEUTRAL: 'bg-neutral-100 text-neutral-600 dark:bg-neutral-800 dark:text-neutral-400 border-neutral-200 dark:border-neutral-700'
+                    DIRECT_COMMERCIAL: 'bg-blue-50 text-blue-700 dark:bg-blue-950/40 dark:text-blue-300 border-blue-200 dark:border-blue-800',
+                    FRIENDLY_INTRO: 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300 border-emerald-200 dark:border-emerald-800',
+                    HIGH_URGENCY: 'bg-amber-50 text-amber-700 dark:bg-amber-950/40 dark:text-amber-300 border-amber-200 dark:border-amber-800',
+                    CONSULTATIVE: 'bg-purple-50 text-purple-700 dark:bg-purple-950/40 dark:text-purple-300 border-purple-200 dark:border-purple-800'
                   };
+                  
+                  const ctaLabel = analysis.ctaStrengthScore >= 70 ? 'STRONG' : analysis.ctaStrengthScore >= 40 ? 'MEDIUM' : 'WEAK';
                   const ctaColors: Record<string, string> = {
                     STRONG: 'text-emerald-600 dark:text-emerald-400',
                     MEDIUM: 'text-amber-600 dark:text-amber-400',
-                    WEAK: 'text-rose-600 dark:text-rose-400',
-                    NONE: 'text-neutral-400'
+                    WEAK: 'text-rose-600 dark:text-rose-400'
                   };
 
                   return (
@@ -209,27 +209,27 @@ export const TemplatesView: React.FC<TemplatesViewProps> = ({
                           <span>AI Copy Metrics</span>
                         </div>
                         <div className="flex items-center gap-2">
-                          <span className={`px-1.5 py-0.5 rounded border text-[10px] font-semibold ${toneColors[analysis.tone]}`}>
-                            {analysis.tone}
+                          <span className={`px-1.5 py-0.5 rounded border text-[10px] font-semibold ${toneColors[analysis.tone] || 'bg-neutral-100 text-neutral-600 border-neutral-200'}`}>
+                            {analysis.toneLabel || analysis.tone}
                           </span>
                           <span className="font-mono text-neutral-500">
-                            {analysis.wordCount} words ({analysis.estimatedReadingTimeSec}s read)
+                            {analysis.wordCount} words ({analysis.readingTimeSeconds}s read)
                           </span>
                         </div>
                       </div>
 
                       <div className="flex items-center justify-between text-[10px] pt-1 border-t border-neutral-200/50 dark:border-neutral-700/50">
                         <span className="text-neutral-500">
-                          CTA Strength: <strong className={ctaColors[analysis.callToActionStrength]}>{analysis.callToActionStrength}</strong>
+                          CTA Strength: <strong className={ctaColors[ctaLabel]}>{ctaLabel} ({analysis.ctaStrengthScore}%)</strong>
                         </span>
                         <span className="text-neutral-500">
-                          Personalized Tags: <strong>{analysis.personalizationTokens.length}</strong>
+                          Personalized Tags: <strong>{analysis.variableCount || 0}</strong>
                         </span>
                       </div>
 
-                      {analysis.improvementSuggestions.length > 0 && (
+                      {analysis.insights && analysis.insights.length > 0 && (
                         <div className="text-[10px] text-amber-700 dark:text-amber-400 bg-amber-50/60 dark:bg-amber-950/20 p-1.5 rounded border border-amber-200/50 dark:border-amber-900/30">
-                          💡 {analysis.improvementSuggestions[0]}
+                          💡 {analysis.insights[0]}
                         </div>
                       )}
                     </div>
