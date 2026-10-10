@@ -4422,6 +4422,17 @@ var SubdomainRouter = class {
         baseDomain: "localhost"
       };
     }
+    if (host.endsWith(".vercel.app")) {
+      const isAppBranch = host.includes("-app") || host.startsWith("app-") || host.startsWith("app.");
+      return {
+        hostname: host,
+        subdomain: isAppBranch ? "app" : null,
+        mode: isAppBranch ? "APP" : "LANDING",
+        tenantSlug: null,
+        isLocalhost: false,
+        baseDomain: "vercel.app"
+      };
+    }
     if (host === "reachoutos.com" || host === "www.reachoutos.com") {
       return {
         hostname: host,
@@ -4497,6 +4508,21 @@ var SubdomainRouter = class {
         return `http://${currentHost}${currentPort}${path2}?${query.toString()}${hash}`;
       }
       return `http://${currentHost}${currentPort}${path2}?${query.toString()}${hash}`;
+    }
+    if (currentHost.endsWith(".vercel.app")) {
+      if (target === "APP") {
+        query.set("subdomain", "app");
+        return `https://${currentHost}${path2}?${query.toString()}${hash}`;
+      }
+      if (target === "LANDING") {
+        query.set("subdomain", "landing");
+        return `https://${currentHost}${path2}?${query.toString()}${hash}`;
+      }
+      if (target === "TENANT" && options.tenantSlug) {
+        query.set("tenant", options.tenantSlug);
+        return `https://${currentHost}${path2}?${query.toString()}${hash}`;
+      }
+      return `https://${currentHost}${path2}?${query.toString()}${hash}`;
     }
     const protocol = "https://";
     const base = this.PRODUCTION_DOMAIN;

@@ -117,7 +117,20 @@ export class SubdomainRouter {
       };
     }
 
-    // 2. Production Domain parsing (reachoutos.com)
+    // 2. Vercel deployment domains (e.g. reachoutos.vercel.app or reachoutos-app.vercel.app)
+    if (host.endsWith('.vercel.app')) {
+      const isAppBranch = host.includes('-app') || host.startsWith('app-') || host.startsWith('app.');
+      return {
+        hostname: host,
+        subdomain: isAppBranch ? 'app' : null,
+        mode: isAppBranch ? 'APP' : 'LANDING',
+        tenantSlug: null,
+        isLocalhost: false,
+        baseDomain: 'vercel.app'
+      };
+    }
+
+    // 3. Production Custom Domain parsing (reachoutos.com)
     if (host === 'reachoutos.com' || host === 'www.reachoutos.com') {
       return {
         hostname: host,
@@ -210,6 +223,23 @@ export class SubdomainRouter {
         return `http://${currentHost}${currentPort}${path}?${query.toString()}${hash}`;
       }
       return `http://${currentHost}${currentPort}${path}?${query.toString()}${hash}`;
+    }
+
+    // Vercel Preview / Default Domain Environment (*.vercel.app)
+    if (currentHost.endsWith('.vercel.app')) {
+      if (target === 'APP') {
+        query.set('subdomain', 'app');
+        return `https://${currentHost}${path}?${query.toString()}${hash}`;
+      }
+      if (target === 'LANDING') {
+        query.set('subdomain', 'landing');
+        return `https://${currentHost}${path}?${query.toString()}${hash}`;
+      }
+      if (target === 'TENANT' && options.tenantSlug) {
+        query.set('tenant', options.tenantSlug);
+        return `https://${currentHost}${path}?${query.toString()}${hash}`;
+      }
+      return `https://${currentHost}${path}?${query.toString()}${hash}`;
     }
 
     // Production Environment with official DNS Subdomains
