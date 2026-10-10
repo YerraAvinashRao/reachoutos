@@ -18,12 +18,76 @@ import { PolicyEngine } from './src/compliance/PolicyEngine';
 import { ComplianceAuditService } from './src/compliance/audit/ComplianceAuditService';
 import { InboundWebhookService } from './src/core/inbound/InboundWebhookService';
 import { EnvironmentValidator } from './src/config/envValidator';
+import { SubdomainRouter, HostInfo } from './src/core/routing/SubdomainRouter';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const app = express();
 const PORT = process.env.PORT || 3000;
+
+// Cross-Subdomain CORS Middleware (allows reachoutos.com, *.reachoutos.com, localhost, *.localhost)
+app.use((req: Request, res: Response, next: NextFunction) => {
+  const origin = req.headers.origin;
+  if (origin) {
+    const isAllowed = 
+      origin.endsWith('reachoutos.com') ||
+      origin.includes('localhost') ||
+      origin.includes('127.0.0.1');
+
+    if (isAllowed) {
+      res.setHeader('Access-Control-Allow-Origin', origin);
+      res.setHeader('Access-Control-Allow-Credentials', 'true');
+      res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, PATCH, OPTIONS');
+      res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With, X-Tenant-ID, X-Subdomain-Mode');
+    }
+  }
+
+  if (req.method === 'OPTIONS') {
+    return res.status(204).end();
+  }
+  next();
+});
+
+// Subdomain Architecture Inspection Middleware
+app.use((req: Request, res: Response, next: NextFunction) => {
+  const host = (req.headers.host || '').split(':')[0];
+  const query = req.url.includes('?') ? new URLSearchParams(req.url.split('?')[1]) : undefined;
+  const hostInfo = SubdomainRouter.parseHost(host, query);
+  
+  (req as any).hostInfo = hostInfo;
+  res.setHeader('X-Subdomain-Mode', hostInfo.mode);
+  if (hostInfo.tenantSlug) {
+    res.setHeader('X-Subdomain-Tenant', hostInfo.tenantSlug);
+  }
+
+  // If request hits API subdomain directly (e.g. api.reachoutos.com/contacts), prefix with /api/v1
+  if (hostInfo.mode === 'API' && !req.path.startsWith('/api') && !req.path.startsWith('/v1') && !req.path.startsWith('/health')) {
+    req.url = `/api/v1${req.url}`;
+  }
+
+  next();
+});
+
+// Branded Shortlinks Engine (links.reachoutos.com/:slug or /l/:slug)
+app.get(['/l/:slug', '/link/:slug'], async (req: Request, res: Response) => {
+  const { slug } = req.params;
+  const target = req.query.url as string;
+  if (target) {
+    try {
+      const decoded = decodeURIComponent(target);
+      return res.redirect(302, decoded);
+    } catch {
+      return res.redirect(302, target);
+    }
+  }
+  return res.json({
+    status: 'ACTIVE',
+    slug,
+    message: 'ReachOutOS Branded Shortlink Service',
+    domain: 'links.reachoutos.com'
+  });
+});
 
 app.use(express.json({ limit: '25mb' }));
 app.get('/favicon.ico', (_req, res) => res.status(204).end());

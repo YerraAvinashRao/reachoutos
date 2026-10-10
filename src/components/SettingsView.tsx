@@ -17,11 +17,14 @@ import {
   Globe,
   Link2,
   Zap,
-  Send
+  Send,
+  Palette,
+  Building2
 } from 'lucide-react';
 import { Tenant, Role, User } from '../types';
 import { supabase } from '../services/supabaseClient';
 import { WebhookGatewayService, WebhookEndpoint } from '../core/integrations/WebhookGatewayService';
+import { TenantBrandingService, TenantBrandingConfig } from '../core/branding/TenantBrandingService';
 
 interface SettingsViewProps {
   tenant: Tenant | null;
@@ -42,6 +45,8 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   const [newPassword, setNewPassword] = useState('');
   const [passwordLoading, setPasswordLoading] = useState(false);
   const [passwordMsg, setPasswordMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+  const [branding, setBranding] = useState<TenantBrandingConfig>(() => TenantBrandingService.getBranding());
+  const [brandingSavedMsg, setBrandingSavedMsg] = useState(false);
 
   const handleUpdatePassword = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -485,7 +490,103 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
         </div>
       </div>
 
-      {/* 5. Data Lifecycle & Export */}
+      {/* 5. Enterprise White-Label Branding & Custom Tracking Domain */}
+      <div className="p-5 rounded-xl border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 shadow-sm space-y-4">
+        <div className="flex items-center justify-between border-b border-neutral-100 dark:border-neutral-800 pb-3">
+          <div>
+            <h3 className="font-bold text-neutral-900 dark:text-neutral-100 text-sm flex items-center gap-2">
+              <Palette className="w-4 h-4 text-emerald-500" />
+              <span>Multi-Tenant White-Label Branding & Custom Domain</span>
+            </h3>
+            <p className="text-[11px] text-neutral-500 mt-0.5">
+              Customize brand name, logo, primary color tokens, and custom shortlink redirect domains.
+            </p>
+          </div>
+          {brandingSavedMsg && (
+            <span className="px-2 py-0.5 rounded-full bg-emerald-100 dark:bg-emerald-950 text-emerald-700 dark:text-emerald-400 font-mono text-[10px] font-bold">
+              ✓ BRANDING SAVED
+            </span>
+          )}
+        </div>
+
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5 text-xs">
+          <div>
+            <label className="block font-semibold text-neutral-700 dark:text-neutral-300 mb-1">
+              Organization / Brand Name:
+            </label>
+            <input
+              type="text"
+              value={branding.orgName}
+              onChange={(e) => setBranding({ ...branding, orgName: e.target.value })}
+              className="w-full px-3 py-1.5 rounded-lg border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100"
+            />
+          </div>
+
+          <div>
+            <label className="block font-semibold text-neutral-700 dark:text-neutral-300 mb-1">
+              Custom Shortlink Tracking Domain:
+            </label>
+            <input
+              type="text"
+              value={branding.trackingDomain}
+              onChange={(e) => setBranding({ ...branding, trackingDomain: e.target.value })}
+              placeholder="e.g. links.yourbrand.com"
+              className="w-full px-3 py-1.5 rounded-lg border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 font-mono"
+            />
+          </div>
+
+          <div>
+            <label className="block font-semibold text-neutral-700 dark:text-neutral-300 mb-1">
+              Sender Desk Alias:
+            </label>
+            <input
+              type="text"
+              value={branding.senderAlias}
+              onChange={(e) => setBranding({ ...branding, senderAlias: e.target.value })}
+              className="w-full px-3 py-1.5 rounded-lg border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100"
+            />
+          </div>
+
+          <div>
+            <label className="block font-semibold text-neutral-700 dark:text-neutral-300 mb-1">
+              Primary Brand Accent Color:
+            </label>
+            <div className="flex items-center gap-2">
+              <input
+                type="color"
+                value={branding.primaryColor}
+                onChange={(e) => setBranding({ ...branding, primaryColor: e.target.value })}
+                className="w-8 h-8 rounded border border-neutral-300 dark:border-neutral-700 cursor-pointer"
+              />
+              <input
+                type="text"
+                value={branding.primaryColor}
+                onChange={(e) => setBranding({ ...branding, primaryColor: e.target.value })}
+                className="flex-1 px-3 py-1.5 rounded-lg border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 font-mono"
+              />
+            </div>
+          </div>
+        </div>
+
+        {/* Live Tracking Link Preview */}
+        <div className="p-3 rounded-lg bg-neutral-50 dark:bg-neutral-800/40 border border-neutral-200 dark:border-neutral-800 text-[11px] flex items-center justify-between">
+          <div className="font-mono text-neutral-600 dark:text-neutral-400 truncate">
+            Sample Tracking URL: <strong className="text-emerald-600 dark:text-emerald-400">{TenantBrandingService.createBrandedLink('https://reachoutos.com/catalog.pdf', 'retailer_intro')}</strong>
+          </div>
+          <button
+            onClick={() => {
+              TenantBrandingService.updateBranding(branding);
+              setBrandingSavedMsg(true);
+              setTimeout(() => setBrandingSavedMsg(false), 3000);
+            }}
+            className="px-3 py-1.5 rounded bg-emerald-600 hover:bg-emerald-700 text-white font-bold transition shadow-xs cursor-pointer shrink-0 ml-2"
+          >
+            Save Brand Settings
+          </button>
+        </div>
+      </div>
+
+      {/* 6. Data Lifecycle & Export */}
       <div className="p-5 rounded-xl border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 shadow-sm space-y-3">
         <div className="flex items-center justify-between">
           <div>

@@ -23,6 +23,7 @@ import { ConversationThread, ConversationMessage, CannedResponse, Role } from '.
 import { apiClient } from '../services/apiClient';
 import { IntentClassifierService } from '../core/nlp/IntentClassifierService';
 import { SmartReplyGeneratorService } from '../core/nlp/SmartReplyGeneratorService';
+import { LeadSLAMonitorService } from '../core/sla/LeadSLAMonitorService';
 
 interface SmartInboxViewProps {
   userRole: Role;
@@ -165,6 +166,45 @@ export const SmartInboxView: React.FC<SmartInboxViewProps> = ({ userRole }) => {
         </div>
       </div>
 
+      {/* Team Inbound Lead SLA & Latency Telemetry Scorecard */}
+      {(() => {
+        const scorecard = LeadSLAMonitorService.calculateTeamScorecard(threads);
+        return (
+          <div className="p-3 rounded-xl bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 shadow-2xs flex flex-wrap items-center justify-between gap-3 text-xs">
+            <div className="flex items-center gap-2">
+              <span className="p-1.5 rounded-lg bg-emerald-50 dark:bg-emerald-950/60 text-emerald-600 dark:text-emerald-400">
+                <Clock className="w-4 h-4" />
+              </span>
+              <div>
+                <span className="font-bold text-neutral-900 dark:text-neutral-100">
+                  Lead SLA & Responsiveness Monitor
+                </span>
+                <div className="text-[10px] text-neutral-400">
+                  Target: &lt;15m for hot commercial inquiries • 1h for general support
+                </div>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-4 text-[11px] font-mono">
+              <div>
+                <span className="text-neutral-400 block text-[10px]">SLA Adherence</span>
+                <span className="font-bold text-emerald-600 dark:text-emerald-400">{scorecard.slaComplianceRatePercent}%</span>
+              </div>
+              <div>
+                <span className="text-neutral-400 block text-[10px]">Median Latency</span>
+                <span className="font-bold text-neutral-800 dark:text-neutral-200">~{scorecard.medianResponseTimeMinutes} mins</span>
+              </div>
+              <div>
+                <span className="text-neutral-400 block text-[10px]">Overdue Inquiries</span>
+                <span className={`font-bold ${scorecard.breachedThreadsCount > 0 ? 'text-rose-600' : 'text-neutral-500'}`}>
+                  {scorecard.breachedThreadsCount} Breached
+                </span>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
       {/* Main Inbox Grid */}
       <div className="grid grid-cols-1 md:grid-cols-12 gap-4 h-[calc(100vh-230px)] min-h-[500px]">
         {/* Left Thread List (5 cols) */}
@@ -192,6 +232,7 @@ export const SmartInboxView: React.FC<SmartInboxViewProps> = ({ userRole }) => {
             ) : (
               filteredThreads.map((thread, idx) => {
                 const isSelected = selectedThread?.phone === thread.phone;
+                const sla = LeadSLAMonitorService.evaluateThread(thread);
                 return (
                   <button
                     key={idx}
@@ -211,9 +252,16 @@ export const SmartInboxView: React.FC<SmartInboxViewProps> = ({ userRole }) => {
                         <span className="font-bold text-xs text-neutral-900 dark:text-neutral-100 truncate">
                           {thread.contactName}
                         </span>
-                        <span className="text-[10px] font-mono text-neutral-400">
-                          {new Date(thread.lastMessageAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                        </span>
+                        <div className="flex items-center gap-1.5">
+                          {thread.lastMessageDirection === 'INBOUND' && (
+                            <span className={`px-1.5 py-0.2 rounded font-mono text-[9px] font-bold border ${sla.badgeColor}`}>
+                              {sla.slaStatus === 'BREACHED' ? 'SLA OVERDUE' : `SLA: <${sla.targetSLAMinutes}m`}
+                            </span>
+                          )}
+                          <span className="text-[10px] font-mono text-neutral-400">
+                            {new Date(thread.lastMessageAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                          </span>
+                        </div>
                       </div>
 
                       <div className="text-[11px] text-neutral-500 truncate">

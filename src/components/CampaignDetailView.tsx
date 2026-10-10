@@ -26,6 +26,7 @@ import { DataQualityEngine } from '../core/validation/dataQuality';
 import { exportCampaignRecipientsToCsv } from '../utils/exportService';
 import { apiClient } from '../services/apiClient';
 import { ABTestingEngine } from '../core/abtesting/ABTestingEngine';
+import { FollowUpAutoPilotService } from '../core/autopilot/FollowUpAutoPilotService';
 
 interface CampaignDetailViewProps {
   campaign: Campaign;
@@ -54,7 +55,7 @@ export const CampaignDetailView: React.FC<CampaignDetailViewProps> = ({
   onDeleteCampaign,
   userRole
 }) => {
-  const [activeTab, setActiveTab] = useState<'overview' | 'preview5' | 'funnel' | 'snapshot' | 'recipients' | 'ab_variants'>('overview');
+  const [activeTab, setActiveTab] = useState<'overview' | 'preview5' | 'funnel' | 'snapshot' | 'recipients' | 'ab_variants' | 'autopilot'>('overview');
   const [promotingWinnerId, setPromotingWinnerId] = useState<string | null>(null);
   const [winnerSuccessMsg, setWinnerSuccessMsg] = useState<string | null>(null);
   const [showTestModal, setShowTestModal] = useState(false);
@@ -391,6 +392,17 @@ export const CampaignDetailView: React.FC<CampaignDetailViewProps> = ({
           }`}
         >
           Immutable Snapshot (Audit Lock)
+        </button>
+        <button
+          onClick={() => setActiveTab('autopilot')}
+          className={`py-2 px-3 border-b-2 transition flex items-center gap-1.5 ${
+            activeTab === 'autopilot'
+              ? 'border-indigo-600 text-indigo-700 dark:text-indigo-300 font-bold'
+              : 'border-transparent text-neutral-500 hover:text-indigo-600'
+          }`}
+        >
+          <Sparkles className="w-3.5 h-3.5 text-indigo-500" />
+          <span>AI Auto-Pilot Queue ({FollowUpAutoPilotService.generateCandidates(recipients, contacts).length})</span>
         </button>
       </div>
 
@@ -859,6 +871,85 @@ export const CampaignDetailView: React.FC<CampaignDetailViewProps> = ({
               {campaign.templateSnapshot.body}
             </div>
           </div>
+        </div>
+      )}
+
+      {/* Tab: AI Auto-Pilot Follow-Up Queue */}
+      {activeTab === 'autopilot' && (
+        <div className="space-y-4 text-xs">
+          {(() => {
+            const candidates = FollowUpAutoPilotService.generateCandidates(recipients, contacts);
+            return (
+              <>
+                <div className="p-4 rounded-xl border border-indigo-200 dark:border-indigo-900/60 bg-indigo-50/40 dark:bg-indigo-950/20 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                  <div>
+                    <div className="flex items-center gap-2 font-bold text-indigo-900 dark:text-indigo-300 text-sm">
+                      <Sparkles className="w-4 h-4 text-indigo-600 dark:text-indigo-400" />
+                      <span>AI Autonomous Follow-up Queue ({candidates.length} Warm Contacts)</span>
+                    </div>
+                    <p className="text-[11px] text-neutral-600 dark:text-neutral-400 mt-0.5">
+                      Targeting recipients who opened or were dispatched 48+ hours ago without replying. Personalized with local incentives.
+                    </p>
+                  </div>
+
+                  <button
+                    onClick={() => {
+                      alert(`🚀 Batch queued ${candidates.length} follow-up drafts for operator review!`);
+                    }}
+                    className="px-3.5 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs flex items-center gap-1.5 transition shadow-xs cursor-pointer self-start sm:self-auto shrink-0"
+                  >
+                    <Send className="w-3.5 h-3.5" />
+                    <span>1-Click Batch Approve Queue</span>
+                  </button>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5">
+                  {candidates.map((c, i) => (
+                    <div key={i} className="p-4 rounded-xl border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 space-y-2.5 shadow-2xs">
+                      <div className="flex items-center justify-between border-b border-neutral-100 dark:border-neutral-800 pb-2">
+                        <div>
+                          <div className="font-bold text-neutral-900 dark:text-neutral-100 text-xs">
+                            {c.contactName}
+                          </div>
+                          <div className="text-[10px] text-neutral-400 font-mono">
+                            {c.companyName} • {c.city} ({c.phone})
+                          </div>
+                        </div>
+
+                        <div className="flex items-center gap-1.5">
+                          <span className="px-2 py-0.5 rounded text-[9px] font-mono font-bold bg-amber-50 dark:bg-amber-950/60 text-amber-700 dark:text-amber-300 border border-amber-200 dark:border-amber-800">
+                            {c.strategyHook.replace(/_/g, ' ')}
+                          </span>
+                          <span className="text-[10px] font-mono text-neutral-400">
+                            {c.hoursSinceLastContact}h ago
+                          </span>
+                        </div>
+                      </div>
+
+                      <div className="p-2.5 rounded-lg bg-neutral-50 dark:bg-neutral-800/40 text-neutral-700 dark:text-neutral-300 text-xs font-sans whitespace-pre-line leading-relaxed border border-neutral-100 dark:border-neutral-800">
+                        {c.generatedFollowUpBody}
+                      </div>
+
+                      <div className="flex items-center justify-between pt-1 text-[11px]">
+                        <span className="text-neutral-400 font-mono text-[10px]">
+                          Target Channel: <strong>{c.channel}</strong>
+                        </span>
+                        <a
+                          href={`https://wa.me/${c.phone.replace(/\D/g, '')}?text=${encodeURIComponent(c.generatedFollowUpBody)}`}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="px-2.5 py-1 rounded bg-emerald-600 hover:bg-emerald-700 text-white text-[10px] font-semibold flex items-center gap-1 shadow-2xs cursor-pointer"
+                        >
+                          <Send className="w-3 h-3" />
+                          <span>Dispatch Follow-up</span>
+                        </a>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </>
+            );
+          })()}
         </div>
       )}
 

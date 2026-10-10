@@ -4326,11 +4326,262 @@ var EnvironmentValidator = class {
   }
 };
 
+// src/core/routing/SubdomainRouter.ts
+var SubdomainRouter = class {
+  static {
+    this.PRODUCTION_DOMAIN = "reachoutos.com";
+  }
+  /**
+   * Parses the hostname and returns detailed subdomain and routing metadata
+   */
+  static parseHost(hostname, searchParams) {
+    const host = (hostname || (typeof window !== "undefined" ? window.location.hostname : "reachoutos.com")).toLowerCase();
+    const isLocalhost = host === "localhost" || host === "127.0.0.1" || host.endsWith(".localhost");
+    if (searchParams) {
+      const explicitSubdomain = searchParams.get("subdomain") || searchParams.get("view");
+      const explicitTenant = searchParams.get("tenant");
+      if (explicitSubdomain === "app") {
+        return {
+          hostname: host,
+          subdomain: "app",
+          mode: "APP",
+          tenantSlug: explicitTenant || null,
+          isLocalhost,
+          baseDomain: isLocalhost ? "localhost" : this.PRODUCTION_DOMAIN
+        };
+      }
+      if (explicitSubdomain === "landing") {
+        return {
+          hostname: host,
+          subdomain: null,
+          mode: "LANDING",
+          tenantSlug: null,
+          isLocalhost,
+          baseDomain: isLocalhost ? "localhost" : this.PRODUCTION_DOMAIN
+        };
+      }
+      if (explicitTenant) {
+        return {
+          hostname: host,
+          subdomain: explicitTenant,
+          mode: "TENANT",
+          tenantSlug: explicitTenant,
+          isLocalhost,
+          baseDomain: isLocalhost ? "localhost" : this.PRODUCTION_DOMAIN
+        };
+      }
+    }
+    if (isLocalhost) {
+      if (host.startsWith("app.")) {
+        return {
+          hostname: host,
+          subdomain: "app",
+          mode: "APP",
+          tenantSlug: null,
+          isLocalhost: true,
+          baseDomain: "localhost"
+        };
+      }
+      if (host.startsWith("api.")) {
+        return {
+          hostname: host,
+          subdomain: "api",
+          mode: "API",
+          tenantSlug: null,
+          isLocalhost: true,
+          baseDomain: "localhost"
+        };
+      }
+      if (host.startsWith("links.")) {
+        return {
+          hostname: host,
+          subdomain: "links",
+          mode: "LINKS",
+          tenantSlug: null,
+          isLocalhost: true,
+          baseDomain: "localhost"
+        };
+      }
+      const parts = host.split(".");
+      if (parts.length > 1 && parts[0] !== "localhost") {
+        return {
+          hostname: host,
+          subdomain: parts[0],
+          mode: "TENANT",
+          tenantSlug: parts[0],
+          isLocalhost: true,
+          baseDomain: "localhost"
+        };
+      }
+      return {
+        hostname: host,
+        subdomain: null,
+        mode: "LANDING",
+        tenantSlug: null,
+        isLocalhost: true,
+        baseDomain: "localhost"
+      };
+    }
+    if (host === "reachoutos.com" || host === "www.reachoutos.com") {
+      return {
+        hostname: host,
+        subdomain: null,
+        mode: "LANDING",
+        tenantSlug: null,
+        isLocalhost: false,
+        baseDomain: this.PRODUCTION_DOMAIN
+      };
+    }
+    if (host.startsWith("app.")) {
+      return {
+        hostname: host,
+        subdomain: "app",
+        mode: "APP",
+        tenantSlug: null,
+        isLocalhost: false,
+        baseDomain: this.PRODUCTION_DOMAIN
+      };
+    }
+    if (host.startsWith("api.")) {
+      return {
+        hostname: host,
+        subdomain: "api",
+        mode: "API",
+        tenantSlug: null,
+        isLocalhost: false,
+        baseDomain: this.PRODUCTION_DOMAIN
+      };
+    }
+    if (host.startsWith("links.")) {
+      return {
+        hostname: host,
+        subdomain: "links",
+        mode: "LINKS",
+        tenantSlug: null,
+        isLocalhost: false,
+        baseDomain: this.PRODUCTION_DOMAIN
+      };
+    }
+    const sub = host.split(".")[0];
+    return {
+      hostname: host,
+      subdomain: sub,
+      mode: "TENANT",
+      tenantSlug: sub,
+      isLocalhost: false,
+      baseDomain: this.PRODUCTION_DOMAIN
+    };
+  }
+  /**
+   * Constructs a cross-subdomain URL for seamless navigation
+   */
+  static buildUrl(target, options = {}) {
+    const isClient = typeof window !== "undefined";
+    const currentHost = isClient ? window.location.hostname : "reachoutos.com";
+    const currentPort = isClient && window.location.port ? `:${window.location.port}` : "";
+    const isLocalhost = currentHost.includes("localhost") || currentHost.includes("127.0.0.1");
+    const path2 = options.path || "/";
+    const hash = options.hash ? `#${options.hash}` : "";
+    const query = new URLSearchParams(options.params || {});
+    if (isLocalhost) {
+      if (target === "APP") {
+        query.set("subdomain", "app");
+        return `http://${currentHost}${currentPort}${path2}?${query.toString()}${hash}`;
+      }
+      if (target === "LANDING") {
+        query.set("subdomain", "landing");
+        return `http://${currentHost}${currentPort}${path2}?${query.toString()}${hash}`;
+      }
+      if (target === "TENANT" && options.tenantSlug) {
+        query.set("tenant", options.tenantSlug);
+        return `http://${currentHost}${currentPort}${path2}?${query.toString()}${hash}`;
+      }
+      return `http://${currentHost}${currentPort}${path2}?${query.toString()}${hash}`;
+    }
+    const protocol = "https://";
+    const base = this.PRODUCTION_DOMAIN;
+    const queryString = query.toString() ? `?${query.toString()}` : "";
+    switch (target) {
+      case "APP":
+        return `${protocol}app.${base}${path2}${queryString}${hash}`;
+      case "API":
+        return `${protocol}api.${base}${path2}${queryString}${hash}`;
+      case "LINKS":
+        return `${protocol}links.${base}${path2}${queryString}${hash}`;
+      case "TENANT":
+        const slug = options.tenantSlug || "app";
+        return `${protocol}${slug}.${base}${path2}${queryString}${hash}`;
+      case "LANDING":
+      default:
+        return `${protocol}${base}${path2}${queryString}${hash}`;
+    }
+  }
+  /**
+   * Returns root cookie domain for cross-subdomain authentication SSO sharing
+   */
+  static getCookieDomain() {
+    if (typeof window === "undefined") return `.${this.PRODUCTION_DOMAIN}`;
+    const host = window.location.hostname;
+    if (host.includes("localhost") || host.includes("127.0.0.1")) {
+      return "localhost";
+    }
+    return `.${this.PRODUCTION_DOMAIN}`;
+  }
+};
+
 // server.ts
 var __filename = fileURLToPath(import.meta.url);
 var __dirname = path.dirname(__filename);
 var app = express();
 var PORT = process.env.PORT || 3e3;
+app.use((req, res, next) => {
+  const origin = req.headers.origin;
+  if (origin) {
+    const isAllowed = origin.endsWith("reachoutos.com") || origin.includes("localhost") || origin.includes("127.0.0.1");
+    if (isAllowed) {
+      res.setHeader("Access-Control-Allow-Origin", origin);
+      res.setHeader("Access-Control-Allow-Credentials", "true");
+      res.setHeader("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, PATCH, OPTIONS");
+      res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Requested-With, X-Tenant-ID, X-Subdomain-Mode");
+    }
+  }
+  if (req.method === "OPTIONS") {
+    return res.status(204).end();
+  }
+  next();
+});
+app.use((req, res, next) => {
+  const host = (req.headers.host || "").split(":")[0];
+  const query = req.url.includes("?") ? new URLSearchParams(req.url.split("?")[1]) : void 0;
+  const hostInfo = SubdomainRouter.parseHost(host, query);
+  req.hostInfo = hostInfo;
+  res.setHeader("X-Subdomain-Mode", hostInfo.mode);
+  if (hostInfo.tenantSlug) {
+    res.setHeader("X-Subdomain-Tenant", hostInfo.tenantSlug);
+  }
+  if (hostInfo.mode === "API" && !req.path.startsWith("/api") && !req.path.startsWith("/v1") && !req.path.startsWith("/health")) {
+    req.url = `/api/v1${req.url}`;
+  }
+  next();
+});
+app.get(["/l/:slug", "/link/:slug"], async (req, res) => {
+  const { slug } = req.params;
+  const target = req.query.url;
+  if (target) {
+    try {
+      const decoded = decodeURIComponent(target);
+      return res.redirect(302, decoded);
+    } catch {
+      return res.redirect(302, target);
+    }
+  }
+  return res.json({
+    status: "ACTIVE",
+    slug,
+    message: "ReachOutOS Branded Shortlink Service",
+    domain: "links.reachoutos.com"
+  });
+});
 app.use(express.json({ limit: "25mb" }));
 app.get("/favicon.ico", (_req, res) => res.status(204).end());
 var whatsAppChannel = new WhatsAppManualChannel();

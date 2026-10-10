@@ -10,11 +10,13 @@ import {
   RefreshCw, 
   HelpCircle,
   FileText,
-  Users
+  Users,
+  Sparkles
 } from 'lucide-react';
 import { apiClient } from '../services/apiClient';
 import { Contact, ContactList } from '../types';
 import { CreateSegmentModal } from './CreateSegmentModal';
+import { DataSanitizerService } from '../core/sanitizer/DataSanitizerService';
 
 interface ImportWizardViewProps {
   onImportComplete: () => void;
@@ -368,6 +370,43 @@ Anand Mohan,Mohan Sweets,12345,invalid-email,Nizamabad,Retailer`;
               <div className="text-lg font-bold font-mono text-rose-700 dark:text-rose-400">{report.invalidRows}</div>
             </div>
           </div>
+
+          {/* AI Smart Data Sanitizer & Transformation Telemetry */}
+          {(() => {
+            const sanitization = DataSanitizerService.sanitizeBatch(rawRows);
+            return (
+              <div className="p-3.5 rounded-xl border border-indigo-200 dark:border-indigo-900/60 bg-indigo-50/40 dark:bg-indigo-950/20 text-xs space-y-2">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-1.5 font-bold text-indigo-950 dark:text-indigo-200">
+                    <Sparkles className="w-3.5 h-3.5 text-indigo-600 dark:text-indigo-400" />
+                    <span>Smart Data Sanitizer & AI Column Transformer</span>
+                  </div>
+                  <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-emerald-100 dark:bg-emerald-950 text-emerald-700 dark:text-emerald-400 font-bold">
+                    ✓ E.164 STANDARDIZED
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 pt-1 font-mono text-[11px]">
+                  <div className="p-2 rounded bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800">
+                    <span className="text-neutral-400 block text-[10px]">Phone Numbers Fixed</span>
+                    <strong className="text-indigo-600 dark:text-indigo-400">{sanitization.phoneNumbersFixed} Auto-Formatted</strong>
+                  </div>
+                  <div className="p-2 rounded bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800">
+                    <span className="text-neutral-400 block text-[10px]">Names Title-Cased</span>
+                    <strong className="text-emerald-600 dark:text-emerald-400">{sanitization.namesNormalized} Standardized</strong>
+                  </div>
+                  <div className="p-2 rounded bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800">
+                    <span className="text-neutral-400 block text-[10px]">Disposable Emails</span>
+                    <strong className="text-neutral-700 dark:text-neutral-300">{sanitization.invalidEmailsFlagged} Flagged</strong>
+                  </div>
+                  <div className="p-2 rounded bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800">
+                    <span className="text-neutral-400 block text-[10px]">Duplicates Stripped</span>
+                    <strong className="text-amber-600 dark:text-amber-400">{sanitization.duplicatesRemoved} Deduplicated</strong>
+                  </div>
+                </div>
+              </div>
+            );
+          })()}
 
           {/* Problematic Rows Triage Table */}
           {report.issues.length > 0 && (

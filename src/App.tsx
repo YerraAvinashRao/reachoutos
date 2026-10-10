@@ -29,20 +29,37 @@ import { Database, ShieldAlert, ExternalLink, Terminal, CheckCircle2, AlertCircl
 import { ReachOut3DLoader } from './components/common/ReachOut3DLoader';
 import { LandingPageView } from './components/LandingPageView';
 import { DataQualityEngine } from './core/validation/dataQuality';
+import { SubdomainRouter, HostInfo, SubdomainType } from './core/routing/SubdomainRouter';
+import { SubdomainSwitcherBar } from './components/common/SubdomainSwitcherBar';
 
 export default function App() {
   const [darkMode, setDarkMode] = useState(true);
   const [activeTab, setActiveTab] = useState<NavTab>('dashboard');
 
+  // Subdomain & Host Architecture State
+  const [hostInfo, setHostInfo] = useState<HostInfo>(() => {
+    try {
+      if (typeof window === 'undefined') return SubdomainRouter.parseHost();
+      return SubdomainRouter.parseHost(window.location.hostname, new URLSearchParams(window.location.search));
+    } catch {
+      return SubdomainRouter.parseHost();
+    }
+  });
+
   // Public Landing Page view state:
-  // When ReachOut is opened, the stunning landing page opens by default!
-  // It only bypasses to workspace if the URL explicitly targets #app or ?app=true or /app.
+  // - If visitor opens reachoutos.com (or root localhost), marketing landing page opens.
+  // - If visitor opens app.reachoutos.com, {tenant}.reachoutos.com, ?subdomain=app, or #app, it loads workspace directly!
   const [showLandingPage, setShowLandingPage] = useState<boolean>(() => {
     try {
       if (typeof window === 'undefined') return true;
       const params = new URLSearchParams(window.location.search);
       const hash = window.location.hash;
       const pathname = window.location.pathname;
+
+      const detected = SubdomainRouter.parseHost(window.location.hostname, params);
+      if (detected.mode === 'APP' || detected.mode === 'TENANT') {
+        return false;
+      }
 
       if (hash === '#app' || params.get('app') === 'true' || params.get('view') === 'app' || pathname === '/app') {
         return false;
@@ -53,14 +70,18 @@ export default function App() {
     }
   });
 
-  // Sync Landing Page toggle with browser URL navigation and hash changes
+  // Sync Landing Page toggle with browser URL navigation, hash changes, and subdomain queries
   useEffect(() => {
     const handleUrlChange = () => {
       const params = new URLSearchParams(window.location.search);
       const hash = window.location.hash;
       const pathname = window.location.pathname;
+      const detected = SubdomainRouter.parseHost(window.location.hostname, params);
+      setHostInfo(detected);
 
-      if (hash === '#app' || params.get('app') === 'true' || params.get('view') === 'app' || pathname === '/app') {
+      if (detected.mode === 'APP' || detected.mode === 'TENANT') {
+        setShowLandingPage(false);
+      } else if (hash === '#app' || params.get('app') === 'true' || params.get('view') === 'app' || pathname === '/app') {
         setShowLandingPage(false);
       } else if (hash === '#landing' || params.get('landing') === 'true' || (!hash && pathname === '/')) {
         setShowLandingPage(true);
@@ -74,6 +95,28 @@ export default function App() {
       window.removeEventListener('hashchange', handleUrlChange);
     };
   }, []);
+
+  const handleSwitchSubdomainMode = (mode: SubdomainType, tenantSlug?: string) => {
+    const url = SubdomainRouter.buildUrl(mode, { tenantSlug });
+    if (typeof window !== 'undefined') {
+      const isLocal = window.location.hostname.includes('localhost') || window.location.hostname.includes('127.0.0.1');
+      if (isLocal) {
+        window.history.pushState(null, '', url);
+        const nextInfo = SubdomainRouter.parseHost(window.location.hostname, new URLSearchParams(window.location.search));
+        setHostInfo(nextInfo);
+        if (mode === 'LANDING') {
+          setShowLandingPage(true);
+        } else {
+          setShowLandingPage(false);
+          if (!isAuthenticated) {
+            loadData();
+          }
+        }
+      } else {
+        window.location.href = url;
+      }
+    }
+  };
 
   // Supabase Database & Auth State
   const [isDatabaseConfigured, setIsDatabaseConfigured] = useState<boolean>(true);
@@ -508,15 +551,14 @@ export default function App() {
   if (showLandingPage) {
     return (
       <div className={darkMode ? 'dark font-sans' : 'font-sans'}>
+        <SubdomainSwitcherBar
+          currentSubdomainMode={hostInfo.mode}
+          tenantSlug={hostInfo.tenantSlug}
+          onSwitchMode={handleSwitchSubdomainMode}
+        />
         <LandingPageView
           onLaunchApp={() => {
-            setShowLandingPage(false);
-            try {
-              window.history.pushState(null, '', '#app');
-            } catch (_) {}
-            if (!isAuthenticated) {
-              loadData();
-            }
+            handleSwitchSubdomainMode('APP');
           }}
           isAuthenticated={isAuthenticated}
           onSignOut={handleSignOut}
@@ -529,6 +571,13 @@ export default function App() {
   return (
     <div className={darkMode ? 'dark font-sans' : 'font-sans'}>
       <div className="min-h-screen bg-neutral-100 dark:bg-neutral-950 text-neutral-900 dark:text-neutral-100 flex flex-col selection:bg-neutral-900 selection:text-white dark:selection:bg-white dark:selection:text-neutral-900">
+        {/* Subdomain Architecture Indicator & Switcher */}
+        <SubdomainSwitcherBar
+          currentSubdomainMode={hostInfo.mode}
+          tenantSlug={hostInfo.tenantSlug}
+          onSwitchMode={handleSwitchSubdomainMode}
+        />
+
         {/* Top Navbar */}
         <Navbar
           tenant={tenant}
@@ -541,10 +590,7 @@ export default function App() {
           onToggleKillSwitch={() => handleToggleKillSwitch('Toggled via top navigation bar')}
           onSignOut={handleSignOut}
           onOpenLanding={() => {
-            setShowLandingPage(true);
-            try {
-              window.history.pushState(null, '', '#landing');
-            } catch (_) {}
+            handleSwitchSubdomainMode('LANDING');
           }}
         />
 
